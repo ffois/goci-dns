@@ -33,6 +33,9 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      - name: Download dependencies
+        run: go mod tidy
+
       - name: Determine version
         id: version
         run: |
