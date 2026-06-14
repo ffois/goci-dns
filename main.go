@@ -218,8 +218,15 @@ func main() {
 		logger.Fatal(fmt.Sprintf("Config error: %v", err))
 	}
 
-	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, %d Cloudflare record(s)",
-		cfg.GoCI.DomainToResolve, len(cfg.CF.CFDNSEntryIDs)))
+	if cfg.GoCI.EnableCloudflare {
+		logger.Info("Cloudflare DNS entries enabled")
+	}
+	if cfg.GoCI.EnableIONOS {
+		logger.Info("IONOS DNS entries enabled")
+	}
+
+	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, %d Cloudflare record(s) | %d IONOS record(s)",
+		cfg.GoCI.DomainToResolve, len(cfg.CF.CFDNSEntryIDs), len(cfg.IONOS.IONOSEntryIDs)))
 
 	if cfg.GoCI.TTLMinutesCheckDNSEntries > 0 {
 		// Daemon mode (systemd service)

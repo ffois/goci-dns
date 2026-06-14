@@ -10,8 +10,9 @@ import (
 
 // Config represents the structure of config.ini.
 type Config struct {
-	GoCI GoCIConfig `ini:"GoCI"`
-	CF   CFConfig   `ini:"CF"`
+	GoCI  GoCIConfig  `ini:"GoCI"`
+	CF    CFConfig    `ini:"CF"`
+	IONOS IONOSConfig `ini:"IONOS"`
 }
 
 // GoCIConfig maps the [GoCI] section.
@@ -21,6 +22,8 @@ type GoCIConfig struct {
 	DomainToResolve           string `ini:"DOMAIN_TO_RESOLVE"`
 	OverrideNewIP             bool   `ini:"OVERRIDE_NEW_IP"`
 	NewIP                     string `ini:"NEW_IP"`
+	EnableIONOS               bool   `ini:"ENABLE_IONOS"`
+	EnableCloudflare          bool   `ini:"ENABLE_CLOUDFLARE"`
 }
 
 // CFConfig maps the [CF] section.
@@ -30,6 +33,14 @@ type CFConfig struct {
 	CFAccountID   string   `ini:"CF_ACCOUNT_ID"`
 	CFDNSEntries  string   `ini:"CF_DNS_ENTRIES_ID"` // raw value from INI
 	CFDNSEntryIDs []string `ini:"-"`                 // parsed IDs from CFDNSEntries
+}
+
+type IONOSConfig struct {
+	IONOSApiUrl   string   `ini:"IONOS_API_URL"`
+	IONOSApiKey   string   `ini:"IONOS_API_KEY"`
+	IONOSZoneID   string   `ini:"IONOS_ZONE_ID"`
+	IONOSEntries  string   `ini:"IONOS_DNS_ENTRIES_ID"` // raw value from INI
+	IONOSEntryIDs []string `ini:"-"`                    // parsed IDs from IONOSEntries
 }
 
 // LoadConfig reads the config.ini file at the given path and returns a Config struct
@@ -47,8 +58,12 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	// Keep raw CF_DNS_ENTRIES_ID and expose parsed IDs for easier usage.
-	config.CF.CFDNSEntryIDs = parseDNSEntryIDs(config.CF.CFDNSEntries)
+	if config.GoCI.EnableIONOS {
+		config.IONOS.IONOSEntryIDs = parseDNSEntryIDs(config.IONOS.IONOSEntries)
+	}
+	if config.GoCI.EnableCloudflare {
+		config.CF.CFDNSEntryIDs = parseDNSEntryIDs(config.CF.CFDNSEntries)
+	}
 
 	if valid, err := ValidateConfig(config); !valid {
 		logger.Warn("Config validation failed:", err)
@@ -83,28 +98,56 @@ func ValidateConfig(config *Config) (bool, error) {
 	}
 
 	// [CF]
-	if isDefault(config.CF.CFToken) {
-		return false, fmt.Errorf("CF.CF_TOKEN is empty or default")
-	}
-	if isDefault(config.CF.CFZoneID) {
-		return false, fmt.Errorf("CF.CF_ZONE_ID is empty or default")
-	}
-	if isDefault(config.CF.CFAccountID) {
-		return false, fmt.Errorf("CF.CF_ACCOUNT_ID is empty or default")
-	}
-	if isDefault(config.CF.CFDNSEntries) {
-		return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID is empty or default")
+	if config.GoCI.EnableCloudflare {
+		if isDefault(config.CF.CFToken) {
+			return false, fmt.Errorf("CF.CF_TOKEN is empty or default")
+		}
+		if isDefault(config.CF.CFZoneID) {
+			return false, fmt.Errorf("CF.CF_ZONE_ID is empty or default")
+		}
+		if isDefault(config.CF.CFAccountID) {
+			return false, fmt.Errorf("CF.CF_ACCOUNT_ID is empty or default")
+		}
+		if isDefault(config.CF.CFDNSEntries) {
+			return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID is empty or default")
+		}
+		if len(config.CF.CFDNSEntryIDs) == 0 {
+			config.CF.CFDNSEntryIDs = parseDNSEntryIDs(config.CF.CFDNSEntries)
+		}
+		if len(config.CF.CFDNSEntryIDs) == 0 {
+			return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID must contain at least one record id")
+		}
+		for _, id := range config.CF.CFDNSEntryIDs {
+			if isDefault(id) {
+				return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID contains default value")
+			}
+		}
 	}
 
-	if len(config.CF.CFDNSEntryIDs) == 0 {
-		config.CF.CFDNSEntryIDs = parseDNSEntryIDs(config.CF.CFDNSEntries)
-	}
-	if len(config.CF.CFDNSEntryIDs) == 0 {
-		return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID must contain at least one record id")
-	}
-	for _, id := range config.CF.CFDNSEntryIDs {
-		if isDefault(id) {
-			return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID contains default value")
+	// [IONOS]
+	if config.GoCI.EnableIONOS {
+		if isDefault(config.IONOS.IONOSApiUrl) {
+			return false, fmt.Errorf("IONOS.IONOS_API_URL is empty or default")
+		}
+		if isDefault(config.IONOS.IONOSApiKey) {
+			return false, fmt.Errorf("IONOS.IONOS_API_KEY is empty or default")
+		}
+		if isDefault(config.IONOS.IONOSZoneID) {
+			return false, fmt.Errorf("IONOS.IONOS_ZONE_ID is empty or default")
+		}
+		if isDefault(config.IONOS.IONOSEntries) {
+			return false, fmt.Errorf("IONOS.IONOS_DNS_ENTRIES_ID is empty or default")
+		}
+		if len(config.IONOS.IONOSEntryIDs) == 0 {
+			config.IONOS.IONOSEntryIDs = parseDNSEntryIDs(config.IONOS.IONOSEntries)
+		}
+		if len(config.IONOS.IONOSEntryIDs) == 0 {
+			return false, fmt.Errorf("IONOS.IONOS_DNS_ENTRIES_ID must contain at least one record id")
+		}
+		for _, id := range config.IONOS.IONOSEntryIDs {
+			if isDefault(id) {
+				return false, fmt.Errorf("IONOS.IONOS_DNS_ENTRIES_ID contains default value")
+			}
 		}
 	}
 
