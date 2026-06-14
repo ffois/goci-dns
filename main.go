@@ -176,6 +176,10 @@ func check(cfg *utils.Config, statePath string) error {
 		return fmt.Errorf("save state: %w", err)
 	}
 	logger.Info(fmt.Sprintf("State saved: ip=%s updatedAt=%s", state.IP, state.UpdatedAt.Format(time.RFC3339)))
+
+	interval := time.Duration(cfg.GoCI.TTLMinutesCheckDNSEntries) * time.Minute
+	logger.Info(fmt.Sprintf("Current run done! New run scheduled in: %s", interval))
+
 	return nil
 }
 

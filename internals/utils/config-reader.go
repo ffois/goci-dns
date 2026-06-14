@@ -35,7 +35,7 @@ type CFConfig struct {
 // LoadConfig reads the config.ini file at the given path and returns a Config struct
 func LoadConfig(path string) (*Config, error) {
 	logger.Log("LoadConfig path:", path)
-	cfg, err := ini.Load(path)
+	cfg, err := ini.LoadSources(ini.LoadOptions{}, path)
 	if err != nil {
 		logger.Log("Fail to read file:", err)
 		return nil, err
@@ -114,7 +114,7 @@ func ValidateConfig(config *Config) (bool, error) {
 // parseDNSEntryIDs converts a semicolon-delimited record-id string into []string.
 func parseDNSEntryIDs(raw string) []string {
 	var entries []string
-	for _, part := range strings.Split(raw, ";") {
+	for _, part := range strings.Split(raw, ",") {
 		if e := strings.TrimSpace(part); e != "" {
 			entries = append(entries, e)
 		}
