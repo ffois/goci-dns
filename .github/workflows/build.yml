@@ -62,21 +62,6 @@ jobs:
             -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
             -o ./dist/goci-dns-linux-arm64 .
           
-          # macOS amd64
-          GOOS=darwin GOARCH=amd64 go build \
-            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/goci-dns-darwin-amd64 .
-          
-          # macOS arm64
-          GOOS=darwin GOARCH=arm64 go build \
-            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/goci-dns-darwin-arm64 .
-          
-          # Windows amd64
-          GOOS=windows GOARCH=amd64 go build \
-            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/goci-dns-windows-amd64.exe .
-          
           ls -lah ./dist/
           echo "artifacts=./dist" >> $GITHUB_OUTPUT
 
