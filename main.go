@@ -86,25 +86,38 @@ func updateCFDNS(cfg *utils.Config, newIP string) error {
 	client := cloudflare.NewClient(option.WithAPIToken(cfg.CF.CFToken))
 	ctx := context.Background()
 
+	currentRecords, err := client.DNS.Records.List(ctx, dns.RecordListParams{
+		ZoneID: cloudflare.F(cfg.CF.CFZoneID),
+	})
+	if err != nil {
+		return fmt.Errorf("list records: %w", err)
+	}
+
 	for _, recordID := range cfg.CF.CFDNSEntryIDs {
 		recordID = strings.TrimSpace(recordID)
 		if recordID == "" {
 			continue
 		}
 
-		// GET – retrieve the existing record to obtain its name.
-		existing, err := client.DNS.Records.Get(ctx, recordID, dns.RecordGetParams{
-			ZoneID: cloudflare.F(cfg.CF.CFZoneID),
-		})
-		if err != nil {
-			return fmt.Errorf("get record %q: %w", recordID, err)
+		var existing *dns.RecordResponse
+		for _, r := range currentRecords.Result {
+			if r.ID == recordID {
+				existing = &r
+				break
+			}
 		}
-
+		if existing == nil {
+			logger.Info(fmt.Sprintf("[%s] record not found in zone – skipping", recordID))
+			continue
+		}
 		recordName := existing.Name
 
-		logLine := fmt.Sprintf("[%s] current name=%q content=%s → new content=%s",
-			recordID, recordName, existing.Content, newIP)
-		logger.Info(logLine)
+		logger.Info(fmt.Sprintf("[%s] current name=%q content=%s → new content=%s", recordID, recordName, existing.Content, newIP))
+
+		if existing.Content == newIP {
+			logger.Info(fmt.Sprintf("[%s] content already matches new IP %s – skipping update", recordID, newIP))
+			continue
+		}
 
 		// PUT – overwrite with the new IP, keeping the same name.
 		_, err = client.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
