@@ -54,7 +54,7 @@ func InitLogger(appName string) error {
 		return fmt.Errorf("logger: user config dir: %w", err)
 	}
 
-	logsDir := filepath.Join(configDir, "EMLy", "logs")
+	logsDir := filepath.Join(configDir, appName, "logs")
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
 		return fmt.Errorf("logger: create logs dir: %w", err)
 	}
