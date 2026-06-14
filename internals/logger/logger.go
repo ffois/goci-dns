@@ -48,7 +48,7 @@ var (
 // %APPDATA%/EMLy/logs/app.log. Rotation: 10 MB max, 5 backups, 28 days,
 // gzip-compressed old files.
 // The log level is read from the LOG_LEVEL env var (DEBUG|INFO|WARN|ERROR).
-func InitLogger() error {
+func InitLogger(appName string) error {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return fmt.Errorf("logger: user config dir: %w", err)

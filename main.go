@@ -121,7 +121,7 @@ func updateCFDNS(cfg *utils.Config, newIP string) error {
 			return fmt.Errorf("update record %q: %w", recordID, err)
 		}
 
-		logger.Info(fmt.Sprintf("[%s] ✓ updated to %s", recordID, newIP))
+		logger.Info(fmt.Sprintf("[%s] success: updated to %s", recordID, newIP))
 	}
 
 	return nil
@@ -184,7 +184,7 @@ func check(cfg *utils.Config, statePath string) error {
 }
 
 func main() {
-	if err := logger.InitLogger(); err != nil {
+	if err := logger.InitLogger("goci-dns"); err != nil {
 		log.Println("Error initializing logger:", err)
 	}
 	defer logger.CloseLogger()
