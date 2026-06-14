@@ -9,6 +9,9 @@ RUN go mod download
 
 COPY . .
 
+# Keep build resilient if config.ini is not committed/present.
+RUN [ -f config.ini ] || touch config.ini
+
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
 
