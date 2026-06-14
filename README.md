@@ -71,6 +71,18 @@ The repository includes:
 
 `ip_state.json` stores the last resolved IP and timestamp, so `goci-dns` can avoid unnecessary updates.
 
+## Third-party modules and licenses
+
+Directly used non-stdlib Go modules in this project:
+
+- `github.com/cloudflare/cloudflare-go/v7` (`v7.5.0`) - Apache License 2.0
+- `github.com/oapi-codegen/runtime` (`v1.4.1`) - Apache License 2.0
+- `github.com/Laky-64/http` (`v1.0.8`) - GNU LGPL v3.0
+- `gopkg.in/ini.v1` (`v1.67.3`) - Apache License 2.0
+- `gopkg.in/natefinch/lumberjack.v2` (`v2.2.1`) - MIT License
+
+Note: versions can change over time; `go.mod` is the source of truth.
+
 ## License
 
 See [LICENSE](LICENSE).
