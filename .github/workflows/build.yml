@@ -51,28 +51,28 @@ jobs:
           
           # Linux amd64
           GOOS=linux GOARCH=amd64 go build \
-            -ldflags="-X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/app-linux-amd64 ./cmd/app
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o ./dist/goci-dns-linux-amd64 .
           
           # Linux arm64
           GOOS=linux GOARCH=arm64 go build \
-            -ldflags="-X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/app-linux-arm64 ./cmd/app
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o ./dist/goci-dns-linux-arm64 .
           
           # macOS amd64
           GOOS=darwin GOARCH=amd64 go build \
-            -ldflags="-X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/app-darwin-amd64 ./cmd/app
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o ./dist/goci-dns-darwin-amd64 .
           
           # macOS arm64
           GOOS=darwin GOARCH=arm64 go build \
-            -ldflags="-X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/app-darwin-arm64 ./cmd/app
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o ./dist/goci-dns-darwin-arm64 .
           
           # Windows amd64
           GOOS=windows GOARCH=amd64 go build \
-            -ldflags="-X main.Version=${{ steps.version.outputs.version }}" \
-            -o ./dist/app-windows-amd64.exe ./cmd/app
+            -ldflags="-s -w -X main.Version=${{ steps.version.outputs.version }}" \
+            -o ./dist/goci-dns-windows-amd64.exe .
           
           ls -lah ./dist/
           echo "artifacts=./dist" >> $GITHUB_OUTPUT
@@ -117,7 +117,7 @@ jobs:
           ## Changelog
           
           - Build version: ${{ needs.build.outputs.version }}
-          - Built with Go $(go version)
+          - Built with Go 1.26
           
           ### Binaries included:
           - Linux x86_64 (amd64)
@@ -138,7 +138,7 @@ jobs:
         uses: ncipollo/release-action@v1
         with:
           artifacts: |
-            dist/app-*
+            dist/goci-dns-*
             dist/SHA256SUMS
           bodyFile: RELEASE_NOTES.md
           draft: false
@@ -176,6 +176,12 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Prepare build args
+        id: build_args
+        run: |
+          BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+          echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
+
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -200,7 +206,7 @@ jobs:
           cache-to: type=gha,mode=max
           build-args: |
             VERSION=${{ needs.build.outputs.version }}
-            BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+            BUILD_DATE=${{ steps.build_args.outputs.build_date }}
 
       - name: Image digest
         run: |
