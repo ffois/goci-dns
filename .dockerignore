@@ -1,0 +1,34 @@
+# Build artifacts
+build/
+tmp/
+*.exe
+
+# Test artifacts
+*.out
+*.test
+coverage.*
+*.coverprofile
+
+# Dev tooling
+.air.toml
+
+# Secrets & local config
+.env
+
+# Version control
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+
+# Docs
+*.md
+LICENSE
+
+# Claude
+.claude/
+
+# IP State
+ip_state.json

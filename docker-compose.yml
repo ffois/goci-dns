@@ -1,0 +1,14 @@
+services:
+  goci-dns:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - logs:/logs
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  logs:
