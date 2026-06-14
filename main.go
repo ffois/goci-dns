@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -140,8 +141,96 @@ func updateCFDNS(cfg *utils.Config, newIP string) error {
 	return nil
 }
 
-// Core logic
+// updateIONOSDNS iterates over every DNS record ID in cfg and updates the record content.
+func updateIONOSDNS(cfg *utils.Config, newIP string) error {
+	ctx := context.Background()
 
+	client, err := utils.NewClientWithResponses(
+		cfg.IONOS.IONOSApiUrl,
+		utils.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
+			req.Header.Set("X-API-Key", cfg.IONOS.IONOSApiKey)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("User-Agent", "goci-dns/1.1.0 (https://github.com/ffois/goci-dns)")
+			req.Header.Set("Accept", "application/json")
+			return nil
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("create ionos client: %w", err)
+	}
+
+	zoneRsp, err := client.GetZoneWithResponse(ctx, cfg.IONOS.IONOSZoneID, nil)
+	if err != nil {
+		return fmt.Errorf("get ionos zone: %w", err)
+	}
+	if zoneRsp.StatusCode() != http.StatusOK || zoneRsp.JSON200 == nil {
+		return fmt.Errorf("get ionos zone failed: status=%d body=%s", zoneRsp.StatusCode(), string(zoneRsp.Body))
+	}
+
+	records := zoneRsp.JSON200.Records
+	if records == nil {
+		return fmt.Errorf("ionos zone has no records payload")
+	}
+
+	for _, recordID := range cfg.IONOS.IONOSEntryIDs {
+		recordID = strings.TrimSpace(recordID)
+		if recordID == "" {
+			logger.Warn(fmt.Sprintf("[IONOS:%s] record ID is empty - skipping", recordID))
+			continue
+		}
+
+		var existing *utils.RecordResponse
+		for i := range *records {
+			r := &(*records)[i]
+			if r.Id != nil && *r.Id == recordID {
+				existing = r
+				break
+			}
+		}
+		if existing == nil {
+			logger.Warn(fmt.Sprintf("[IONOS:%s] record not found in zone - skipping", recordID))
+			continue
+		}
+
+		recordName := ""
+		if existing.Name != nil {
+			recordName = *existing.Name
+		}
+		currentContent := ""
+		if existing.Content != nil {
+			currentContent = *existing.Content
+		}
+
+		logger.Info(fmt.Sprintf("[IONOS:%s] current name=%q content=%s -> new content=%s", recordID, recordName, currentContent, newIP))
+
+		if currentContent == newIP {
+			logger.Info(fmt.Sprintf("[IONOS:%s] content already matches new IP %s - skipping update", recordID, newIP))
+			continue
+		}
+
+		newContent := newIP
+		updateBody := utils.UpdateRecordJSONRequestBody{
+			Content:  &newContent,
+			Disabled: existing.Disabled,
+			Prio:     existing.Prio,
+			Ttl:      existing.Ttl,
+		}
+
+		updateRsp, err := client.UpdateRecordWithResponse(ctx, cfg.IONOS.IONOSZoneID, recordID, updateBody)
+		if err != nil {
+			return fmt.Errorf("update ionos record %q: %w", recordID, err)
+		}
+		if updateRsp.StatusCode() != http.StatusOK || updateRsp.JSON200 == nil {
+			return fmt.Errorf("update ionos record %q failed: status=%d body=%s", recordID, updateRsp.StatusCode(), string(updateRsp.Body))
+		}
+
+		logger.Info(fmt.Sprintf("[IONOS:%s] success: updated to %s", recordID, newIP))
+	}
+
+	return nil
+}
+
+// Core logic
 func check(cfg *utils.Config, statePath string) error {
 	// 1. Resolve the current public IP via DNS lookup (same as pinging the domain).
 	currentIP, err := resolveIP(cfg.GoCI.DomainToResolve)
@@ -177,9 +266,15 @@ func check(cfg *utils.Config, statePath string) error {
 			targetIP, currentIP))
 	}
 
-	// 5. Push update to Cloudflare.
-	if err := updateCFDNS(cfg, targetIP); err != nil {
-		return fmt.Errorf("cloudflare update: %w", err)
+	if cfg.GoCI.EnableCloudflare {
+		if err := updateCFDNS(cfg, targetIP); err != nil {
+			return fmt.Errorf("cloudflare update: %w", err)
+		}
+	}
+	if cfg.GoCI.EnableIONOS {
+		if err := updateIONOSDNS(cfg, targetIP); err != nil {
+			return fmt.Errorf("ionos update: %w", err)
+		}
 	}
 
 	// 6. Persist the current (resolved) IP so the next run can detect changes.
