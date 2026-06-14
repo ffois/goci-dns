@@ -1,0 +1,26 @@
+# Dockerfile.build - Per GitHub Actions (usa artifacts pre-compilati)
+# USAGE: docker build -f Dockerfile.build --build-arg VERSION=v1.0.0 .
+
+FROM alpine:latest
+
+LABEL authors="Flavio Fois"
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.version=${VERSION}
+LABEL org.opencontainers.image.created=${BUILD_DATE}
+
+RUN apk --no-cache add ca-certificates tzdata
+
+WORKDIR /app
+
+# Copia il binario Linux amd64 dai dist artifacts di GitHub Actions
+COPY dist/goci-dns-linux-amd64 ./goci-dns
+COPY config.ini .
+COPY docker/entrypoint.sh /entrypoint.sh
+
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
+RUN mkdir -p /logs
+RUN chmod +x ./goci-dns
+
+ENTRYPOINT ["/entrypoint.sh"]

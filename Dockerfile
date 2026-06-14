@@ -8,10 +8,24 @@ COPY go.mod ./
 RUN go mod download
 
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o goci-dns .
+
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+    go build \
+    -ldflags="-s -w -X main.Version=${VERSION} -X main.BuildDate=${BUILD_DATE}" \
+    -o goci-dns .
 
 # --- Runtime stage ---
 FROM alpine:latest
+
+LABEL authors="Flavio Fois"
+ARG VERSION=dev
+ARG BUILD_DATE=unknown
+
+LABEL org.opencontainers.image.version=${VERSION}
+LABEL org.opencontainers.image.created=${BUILD_DATE}
 
 RUN apk --no-cache add ca-certificates tzdata
 
