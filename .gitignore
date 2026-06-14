@@ -33,3 +33,6 @@ go.work.sum
 
 # Go sum
 go.sum
+
+# Config file
+config.ini
