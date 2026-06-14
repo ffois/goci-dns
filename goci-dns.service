@@ -1,0 +1,56 @@
+# /etc/systemd/system/goci-dns.service
+#
+# Systemd service unit for goci-dns.
+#
+# Install:
+#   sudo cp goci-dns         /usr/local/bin/goci-dns
+#   sudo cp config.ini       /etc/goci-dns/config.ini
+#   sudo cp ip_state.json    /etc/goci-dns/ip_state.json   # first-run state
+#   sudo cp goci-dns.service /etc/systemd/system/goci-dns.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now goci-dns
+#
+# Notes:
+#   - Set TTL_MINUTES_CHECK_DNS_ENTRIES > 0 in config.ini for daemon mode.
+#   - Use goci-dns.timer (see below) for cron-style scheduling instead.
+
+[Unit]
+Description=goci-dns – Cloudflare dynamic DNS updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nobody
+Group=nogroup
+ExecStart=/usr/local/bin/goci-dns /etc/goci-dns/config.ini /etc/goci-dns/ip_state.json
+Restart=on-failure
+RestartSec=30s
+# Give the process write access only to its state directory.
+ReadWritePaths=/etc/goci-dns
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target
+
+
+# ─── Alternative: run as a systemd timer (cron-job style) ────────────────────
+# If you prefer one-shot invocations (TTL_MINUTES_CHECK_DNS_ENTRIES = 0) create
+# an additional .timer unit:
+#
+# /etc/systemd/system/goci-dns.timer
+# ─────────────────────────────────
+# [Unit]
+# Description=Run goci-dns every 5 minutes
+#
+# [Timer]
+# OnBootSec=1min
+# OnUnitActiveSec=5min
+# Unit=goci-dns.service
+#
+# [Install]
+# WantedBy=timers.target
+#
+# Then enable only the timer:
+#   sudo systemctl enable --now goci-dns.timer
+

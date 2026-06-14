@@ -1,0 +1,8 @@
+# crontab – one-shot cron job example
+#
+# Add this to root's crontab with:
+#   sudo crontab -e
+#
+# Run every 5 minutes (TTL_MINUTES_CHECK_DNS_ENTRIES must be 0 in config.ini):
+*/5 * * * * /usr/local/bin/goci-dns /etc/goci-dns/config.ini /etc/goci-dns/ip_state.json >> /var/log/goci-dns.log 2>&1
+
