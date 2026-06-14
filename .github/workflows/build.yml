@@ -23,20 +23,9 @@ jobs:
       - name: Download dependencies
         run: go mod tidy
 
-      - name: Determine version
-        id: version
-        run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            VERSION=${GITHUB_REF#refs/tags/}
-          else
-            VERSION=dev-$(date +%Y%m%d-%H%M%S)
-          fi
-          echo "version=${VERSION}" >> $GITHUB_OUTPUT
-          echo "Version: ${VERSION}"
-
       - name: Build binaries
         id: build
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w -o goci-dns .
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o goci-dns .
 
       - name: Run test
         run: go test ./... -v
