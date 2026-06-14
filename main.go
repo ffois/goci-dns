@@ -11,92 +11,13 @@ import (
 	"strings"
 	"time"
 
+	"goci-dns/internals/logger"
+	"goci-dns/internals/utils"
+
 	cloudflare "github.com/cloudflare/cloudflare-go/v7"
 	"github.com/cloudflare/cloudflare-go/v7/dns"
 	"github.com/cloudflare/cloudflare-go/v7/option"
-	"gopkg.in/ini.v1"
 )
-
-// Config holds all settings read from config.ini.
-type Config struct {
-	// TTLMinutesCheckDNSEntries controls the polling interval when running as a
-	// long-lived daemon (e.g. systemd service).  Set to 0 to run once and exit
-	// (cron-job mode).
-	TTLMinutesCheckDNSEntries int
-
-	// IgnoreOldIP forces a Cloudflare update even when the resolved IP matches
-	// the saved IP.
-	IgnoreOldIP bool
-
-	// DomainToResolve is the hostname that is pinged / resolved to obtain the
-	// current public IP (e.g. "i59n5i62jw4mazmm.myfritz.net").
-	DomainToResolve string
-
-	// OverrideNewIP, when true, uses NewIP instead of the resolved address when
-	// pushing updates to Cloudflare.
-	OverrideNewIP bool
-
-	// NewIP is the static IP to push when OverrideNewIP is true.
-	NewIP string
-
-	// CFToken is the Cloudflare API token.
-	CFToken string
-
-	// CFZoneID is the Cloudflare Zone ID that owns the DNS records.
-	CFZoneID string
-
-	// CFAccountID is the Cloudflare Account ID (reserved for future use).
-	CFAccountID string
-
-	// CFDNSEntriesID is the list of DNS record IDs to update, split by ";".
-	CFDNSEntriesID []string
-}
-
-// loadConfig reads config.ini from path and returns a populated Config.
-func loadConfig(path string) (*Config, error) {
-	cfg, err := ini.LoadSources(ini.LoadOptions{
-		IgnoreInlineComment: true,
-	}, path)
-	if err != nil {
-		return nil, fmt.Errorf("load config file %q: %w", path, err)
-	}
-
-	sec := cfg.Section("")
-
-	ttlMinutes, err := sec.Key("TTL_MINUTES_CHECK_DNS_ENTRIES").Int()
-	if err != nil {
-		return nil, fmt.Errorf("TTL_MINUTES_CHECK_DNS_ENTRIES: %w", err)
-	}
-
-	ignoreOldIP, err := sec.Key("IGNORE_OLD_IP").Bool()
-	if err != nil {
-		return nil, fmt.Errorf("IGNORE_OLD_IP: %w", err)
-	}
-
-	overrideNewIP, err := sec.Key("OVERRIDE_NEW_IP").Bool()
-	if err != nil {
-		return nil, fmt.Errorf("OVERRIDE_NEW_IP: %w", err)
-	}
-
-	var entries []string
-	for _, raw := range strings.Split(sec.Key("CF_DNS_ENTRIES_ID").String(), ";") {
-		if e := strings.TrimSpace(raw); e != "" {
-			entries = append(entries, e)
-		}
-	}
-
-	return &Config{
-		TTLMinutesCheckDNSEntries: ttlMinutes,
-		IgnoreOldIP:               ignoreOldIP,
-		DomainToResolve:           strings.TrimSpace(sec.Key("DOMAIN_TO_RESOLVE").String()),
-		OverrideNewIP:             overrideNewIP,
-		NewIP:                     strings.TrimSpace(sec.Key("NEW_IP").String()),
-		CFToken:                   strings.TrimSpace(sec.Key("CF_TOKEN").String()),
-		CFZoneID:                  strings.TrimSpace(sec.Key("CF_ZONE_ID").String()),
-		CFAccountID:               strings.TrimSpace(sec.Key("CF_ACCOUNT_ID").String()),
-		CFDNSEntriesID:            entries,
-	}, nil
-}
 
 // IPState is persisted to ip_state.json to remember the last known IP.
 type IPState struct {
@@ -161,11 +82,11 @@ func resolveIP(domain string) (string, error) {
 
 // updateCFDNS iterates over every DNS record ID in cfg and PUTs the new IP.
 // It first GETs the current record so it can preserve the record name.
-func updateCFDNS(cfg *Config, newIP string) error {
-	client := cloudflare.NewClient(option.WithAPIToken(cfg.CFToken))
+func updateCFDNS(cfg *utils.Config, newIP string) error {
+	client := cloudflare.NewClient(option.WithAPIToken(cfg.CF.CFToken))
 	ctx := context.Background()
 
-	for _, recordID := range cfg.CFDNSEntriesID {
+	for _, recordID := range cfg.CF.CFDNSEntryIDs {
 		recordID = strings.TrimSpace(recordID)
 		if recordID == "" {
 			continue
@@ -173,19 +94,21 @@ func updateCFDNS(cfg *Config, newIP string) error {
 
 		// GET – retrieve the existing record to obtain its name.
 		existing, err := client.DNS.Records.Get(ctx, recordID, dns.RecordGetParams{
-			ZoneID: cloudflare.F(cfg.CFZoneID),
+			ZoneID: cloudflare.F(cfg.CF.CFZoneID),
 		})
 		if err != nil {
 			return fmt.Errorf("get record %q: %w", recordID, err)
 		}
 
 		recordName := existing.Name
-		log.Printf("[%s] current name=%q content=%s → new content=%s",
+
+		logLine := fmt.Sprintf("[%s] current name=%q content=%s → new content=%s",
 			recordID, recordName, existing.Content, newIP)
+		logger.Info(logLine)
 
 		// PUT – overwrite with the new IP, keeping the same name.
 		_, err = client.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
-			ZoneID: cloudflare.F(cfg.CFZoneID),
+			ZoneID: cloudflare.F(cfg.CF.CFZoneID),
 			Body: dns.ARecordParam{
 				Name:    cloudflare.F(recordName),
 				Type:    cloudflare.F(dns.ARecordTypeA),
@@ -198,7 +121,7 @@ func updateCFDNS(cfg *Config, newIP string) error {
 			return fmt.Errorf("update record %q: %w", recordID, err)
 		}
 
-		log.Printf("[%s] ✓ updated to %s", recordID, newIP)
+		logger.Info(fmt.Sprintf("[%s] ✓ updated to %s", recordID, newIP))
 	}
 
 	return nil
@@ -206,13 +129,13 @@ func updateCFDNS(cfg *Config, newIP string) error {
 
 // Core logic
 
-func check(cfg *Config, statePath string) error {
+func check(cfg *utils.Config, statePath string) error {
 	// 1. Resolve the current public IP via DNS lookup (same as pinging the domain).
-	currentIP, err := resolveIP(cfg.DomainToResolve)
+	currentIP, err := resolveIP(cfg.GoCI.DomainToResolve)
 	if err != nil {
 		return fmt.Errorf("resolve IP: %w", err)
 	}
-	log.Printf("Resolved %q → %s", cfg.DomainToResolve, currentIP)
+	logger.Info(fmt.Sprintf("Resolved %q → %s", cfg.GoCI.DomainToResolve, currentIP))
 
 	// 2. Load the last saved IP.
 	state, err := loadIPState(statePath)
@@ -222,23 +145,23 @@ func check(cfg *Config, statePath string) error {
 
 	// 3. Decide whether an update is required.
 	ipChanged := state.IP != currentIP
-	if !ipChanged && !cfg.IgnoreOldIP {
-		log.Printf("IP unchanged (%s) – nothing to do.", currentIP)
+	if !ipChanged && !cfg.GoCI.IgnoreOldIP {
+		logger.Info(fmt.Sprintf("IP unchanged (%s) – nothing to do.", currentIP))
 		return nil
 	}
 
 	if ipChanged {
-		log.Printf("IP changed: %q → %q", state.IP, currentIP)
+		logger.Info(fmt.Sprintf("IP changed: %q → %q", state.IP, currentIP))
 	} else {
-		log.Printf("IGNORE_OLD_IP=true – forcing update regardless of IP match.")
+		logger.Info(fmt.Sprintf("IGNORE_OLD_IP=true – forcing update regardless of IP match."))
 	}
 
 	// 4. Determine the target IP to push to Cloudflare.
 	targetIP := currentIP
-	if cfg.OverrideNewIP && cfg.NewIP != "" {
-		targetIP = cfg.NewIP
-		log.Printf("OVERRIDE_NEW_IP=true – using configured IP %s instead of resolved %s",
-			targetIP, currentIP)
+	if cfg.GoCI.OverrideNewIP && cfg.GoCI.NewIP != "" {
+		targetIP = cfg.GoCI.NewIP
+		logger.Info(fmt.Sprintf("OVERRIDE_NEW_IP=true – using configured IP %s instead of resolved %s",
+			targetIP, currentIP))
 	}
 
 	// 5. Push update to Cloudflare.
@@ -252,11 +175,16 @@ func check(cfg *Config, statePath string) error {
 	if err := saveIPState(statePath, state); err != nil {
 		return fmt.Errorf("save state: %w", err)
 	}
-	log.Printf("State saved: ip=%s updatedAt=%s", state.IP, state.UpdatedAt.Format(time.RFC3339))
+	logger.Info(fmt.Sprintf("State saved: ip=%s updatedAt=%s", state.IP, state.UpdatedAt.Format(time.RFC3339)))
 	return nil
 }
 
 func main() {
+	if err := logger.InitLogger(); err != nil {
+		log.Println("Error initializing logger:", err)
+	}
+	defer logger.CloseLogger()
+
 	// Usage: goci-dns [config.ini [ip_state.json]]
 	configPath := "config.ini"
 	if len(os.Args) > 1 {
@@ -268,23 +196,23 @@ func main() {
 		statePath = os.Args[2]
 	}
 
-	cfg, err := loadConfig(configPath)
+	cfg, err := utils.LoadConfig(configPath)
 	if err != nil {
-		log.Fatalf("Config error: %v", err)
+		logger.Fatal(fmt.Sprintf("Config error: %v", err))
 	}
 
-	log.Printf("goci-dns started – monitoring %q, %d Cloudflare record(s)",
-		cfg.DomainToResolve, len(cfg.CFDNSEntriesID))
+	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, %d Cloudflare record(s)",
+		cfg.GoCI.DomainToResolve, len(cfg.CF.CFDNSEntryIDs)))
 
-	if cfg.TTLMinutesCheckDNSEntries > 0 {
+	if cfg.GoCI.TTLMinutesCheckDNSEntries > 0 {
 		// Daemon mode (systemd service)
 		// Run immediately, then repeat every TTLMinutesCheckDNSEntries minutes.
-		interval := time.Duration(cfg.TTLMinutesCheckDNSEntries) * time.Minute
-		log.Printf("Daemon mode: checking every %s", interval)
+		interval := time.Duration(cfg.GoCI.TTLMinutesCheckDNSEntries) * time.Minute
+		logger.Info(fmt.Sprintf("Daemon mode: checking every %s", interval))
 
 		runCheck := func() {
 			if err := check(cfg, statePath); err != nil {
-				log.Printf("ERROR: %v", err)
+				logger.Info(fmt.Sprintf("ERROR: %v", err))
 			}
 		}
 
@@ -297,9 +225,9 @@ func main() {
 		}
 	} else {
 		// OneShot mode (if enabled via cron job and TTL_MINUTES_CHECK_DNS_ENTRIES=0)
-		log.Printf("One-shot mode (TTL_MINUTES_CHECK_DNS_ENTRIES=0).")
+		logger.Info(fmt.Sprintf("One-shot mode (TTL_MINUTES_CHECK_DNS_ENTRIES=0)."))
 		if err := check(cfg, statePath); err != nil {
-			log.Fatalf("ERROR: %v", err)
+			logger.Fatal(fmt.Sprintf("ERROR: %v", err))
 		}
 	}
 }
