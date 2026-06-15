@@ -58,7 +58,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if !config.GoCI.EnableIONOS || !config.GoCI.EnableCloudflare {
+	if !config.GoCI.EnableIONOS && !config.GoCI.EnableCloudflare {
 		logger.Fatal("At least one provider must be enabled: GoCI.EnableIONOS or GoCI.EnableCloudflare")
 	}
 
