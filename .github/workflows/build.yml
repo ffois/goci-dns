@@ -23,9 +23,9 @@ jobs:
       - name: Download dependencies
         run: go mod tidy
 
-      - name: Build binaries
-        id: build
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o goci-dns .
+      - name: Test build
+        id: test
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go vet ./...
 
       - name: Run test
         run: go test ./... -v
