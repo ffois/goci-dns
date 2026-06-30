@@ -145,29 +145,17 @@ func updateCFDNS(cfg *utils.Config, newIP string) error {
 func updateIONOSDNS(cfg *utils.Config, newIP string) error {
 	ctx := context.Background()
 
-	client, err := utils.NewClientWithResponses(
-		cfg.IONOS.IONOSApiUrl,
-		utils.WithRequestEditorFn(func(_ context.Context, req *http.Request) error {
-			req.Header.Set("X-API-Key", cfg.IONOS.IONOSApiKey)
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("User-Agent", "goci-dns/1.1.0 (https://github.com/ffois/goci-dns)")
-			req.Header.Set("Accept", "application/json")
-			return nil
-		}),
+	client := ionos.NewClient(
+		ionos.WithAPIKey(cfg.IONOS.IONOSApiKey),
+		ionos.WithBaseURL(cfg.IONOS.IONOSApiUrl),
 	)
-	if err != nil {
-		return fmt.Errorf("create ionos client: %w", err)
-	}
 
-	zoneRsp, err := client.GetZoneWithResponse(ctx, cfg.IONOS.IONOSZoneID, nil)
+	zone, err := client.Zones.Get(ctx, cfg.IONOS.IONOSZoneID, nil)
 	if err != nil {
 		return fmt.Errorf("get ionos zone: %w", err)
 	}
-	if zoneRsp.StatusCode() != http.StatusOK || zoneRsp.JSON200 == nil {
-		return fmt.Errorf("get ionos zone failed: status=%d body=%s", zoneRsp.StatusCode(), string(zoneRsp.Body))
-	}
 
-	records := zoneRsp.JSON200.Records
+	records := zone.Records
 	if records == nil {
 		return fmt.Errorf("ionos zone has no records payload")
 	}
@@ -179,7 +167,7 @@ func updateIONOSDNS(cfg *utils.Config, newIP string) error {
 			continue
 		}
 
-		var existing *utils.RecordResponse
+		var existing *ionos.RecordResponse
 		for i := range *records {
 			r := &(*records)[i]
 			if r.Id != nil && *r.Id == recordID {
@@ -209,19 +197,15 @@ func updateIONOSDNS(cfg *utils.Config, newIP string) error {
 		}
 
 		newContent := newIP
-		updateBody := utils.UpdateRecordJSONRequestBody{
+		updateBody := ionos.UpdateRecordJSONRequestBody{
 			Content:  &newContent,
 			Disabled: existing.Disabled,
 			Prio:     existing.Prio,
 			Ttl:      existing.Ttl,
 		}
 
-		updateRsp, err := client.UpdateRecordWithResponse(ctx, cfg.IONOS.IONOSZoneID, recordID, updateBody)
-		if err != nil {
+		if _, err := client.Records.Update(ctx, cfg.IONOS.IONOSZoneID, recordID, updateBody); err != nil {
 			return fmt.Errorf("update ionos record %q: %w", recordID, err)
-		}
-		if updateRsp.StatusCode() != http.StatusOK || updateRsp.JSON200 == nil {
-			return fmt.Errorf("update ionos record %q failed: status=%d body=%s", recordID, updateRsp.StatusCode(), string(updateRsp.Body))
 		}
 
 		logger.Info(fmt.Sprintf("[IONOS:%s] success: updated to %s", recordID, newIP))
