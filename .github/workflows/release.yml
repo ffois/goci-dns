@@ -108,15 +108,6 @@ jobs:
           ### Binaries included:
           - Linux x86_64 (amd64)
           - Linux ARM64 (aarch64)
-          - macOS Intel (amd64)
-          - macOS Apple Silicon (arm64)
-          - Windows x86_64 (amd64)
-          
-          ### Verification
-          Download the SHA256SUMS file and verify:
-          \`\`\`bash
-          sha256sum -c SHA256SUMS
-          \`\`\`
           EOF
           cat RELEASE_NOTES.md
 
