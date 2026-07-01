@@ -2,8 +2,6 @@ name: Build, Release & Docker
 
 on:
   push:
-    branches:
-      - stable
     tags:
       - 'v*'
   workflow_dispatch:
@@ -176,10 +174,10 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=ref,event=branch
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-
+            type=sha
+            type=raw,value=latest
             type=raw,value=${{ needs.build.outputs.version }}
 
       - name: Build and push Docker image
