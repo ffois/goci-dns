@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/Laky-64/http v1.0.8
 	github.com/cloudflare/cloudflare-go/v7 v7.5.0
-	github.com/ffois/go-ionos v0.0.0-20260630193103-da33f00e5a58
+	github.com/ffois/go-ionos v1.0.0
 	gopkg.in/ini.v1 v1.67.3
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
