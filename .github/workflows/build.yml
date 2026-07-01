@@ -24,9 +24,5 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Build binaries
-        id: build
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o goci-dns .
-
       - name: Run test
         run: go test ./... -v
