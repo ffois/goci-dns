@@ -31,8 +31,5 @@ go.work.sum
 .idea/
 .vscode/
 
-# Go sum
-go.sum
-
 # Config file
 config.ini

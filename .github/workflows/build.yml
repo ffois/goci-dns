@@ -19,7 +19,9 @@ jobs:
           cache: true
 
       - name: Download dependencies
-        run: go mod tidy
+        run: |
+          go mod download
+          go mod verify
 
       - name: Vet
         run: go vet ./...
