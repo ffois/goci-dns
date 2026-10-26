@@ -3,10 +3,14 @@ package utils
 import (
 	"fmt"
 	"goci-dns/internals/logger"
+	"net/url"
 	"strings"
 
 	"gopkg.in/ini.v1"
 )
+
+// DefaultIPDiscoveryURL is used when USE_IP_DISCOVERY=true and IP_DISCOVERY_URL is empty.
+const DefaultIPDiscoveryURL = "https://api.ipify.org"
 
 // Config represents the structure of config.ini.
 type Config struct {
@@ -20,6 +24,8 @@ type GoCIConfig struct {
 	TTLMinutesCheckDNSEntries int    `ini:"TTL_MINUTES_CHECK_DNS_ENTRIES"`
 	IgnoreOldIP               bool   `ini:"IGNORE_OLD_IP"`
 	DomainToResolve           string `ini:"DOMAIN_TO_RESOLVE"`
+	UseIPDiscovery            bool   `ini:"USE_IP_DISCOVERY"`
+	IPDiscoveryURL            string `ini:"IP_DISCOVERY_URL"`
 	OverrideNewIP             bool   `ini:"OVERRIDE_NEW_IP"`
 	NewIP                     string `ini:"NEW_IP"`
 	EnableIONOS               bool   `ini:"ENABLE_IONOS"`
@@ -58,6 +64,10 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	if config.GoCI.UseIPDiscovery && strings.TrimSpace(config.GoCI.IPDiscoveryURL) == "" {
+		config.GoCI.IPDiscoveryURL = DefaultIPDiscoveryURL
+	}
+
 	if config.GoCI.EnableIONOS {
 		config.IONOS.IONOSEntryIDs = parseDNSEntryIDs(config.IONOS.IONOSEntries)
 	}
@@ -93,7 +103,12 @@ func ValidateConfig(config *Config) (bool, error) {
 	if config.GoCI.TTLMinutesCheckDNSEntries < 0 {
 		return false, fmt.Errorf("GoCI.TTL_MINUTES_CHECK_DNS_ENTRIES must be >= 0")
 	}
-	if isDefault(config.GoCI.DomainToResolve) {
+	if config.GoCI.UseIPDiscovery {
+		u, err := url.Parse(strings.TrimSpace(config.GoCI.IPDiscoveryURL))
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return false, fmt.Errorf("GoCI.IP_DISCOVERY_URL must be an http(s) URL when USE_IP_DISCOVERY=true")
+		}
+	} else if isDefault(config.GoCI.DomainToResolve) {
 		return false, fmt.Errorf("GoCI.DOMAIN_TO_RESOLVE is empty or default")
 	}
 	if config.GoCI.OverrideNewIP && isDefault(config.GoCI.NewIP) {

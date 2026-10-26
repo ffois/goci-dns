@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"goci-dns/internals/logger"
@@ -80,14 +83,70 @@ func resolveIP(domain string) (string, error) {
 	return "", fmt.Errorf("no IPv4 address found for %q", domain)
 }
 
+// fetchPublicIP asks an HTTP "what is my IP" service (e.g. https://api.ipify.org)
+// for the current public IPv4. The request is forced over IPv4 so dual-stack
+// services cannot answer with an IPv6 address.
+func fetchPublicIP(discoveryURL string) (string, error) {
+	dialer := &net.Dialer{Timeout: 10 * time.Second}
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			DialContext: func(ctx context.Context, _, addr string) (net.Conn, error) {
+				return dialer.DialContext(ctx, "tcp4", addr)
+			},
+		},
+	}
+
+	resp, err := client.Get(discoveryURL)
+	if err != nil {
+		return "", fmt.Errorf("get %q: %w", discoveryURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("get %q: unexpected status %s", discoveryURL, resp.Status)
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 64))
+	if err != nil {
+		return "", fmt.Errorf("read %q: %w", discoveryURL, err)
+	}
+
+	ip := net.ParseIP(strings.TrimSpace(string(body)))
+	if ip == nil || ip.To4() == nil {
+		return "", fmt.Errorf("%q did not return an IPv4 address: %q", discoveryURL, strings.TrimSpace(string(body)))
+	}
+	return ip.String(), nil
+}
+
+// currentPublicIP returns the current public IPv4, either from the HTTP
+// discovery service (USE_IP_DISCOVERY=true) or by resolving DOMAIN_TO_RESOLVE.
+func currentPublicIP(cfg *utils.Config) (string, error) {
+	if cfg.GoCI.UseIPDiscovery {
+		ip, err := fetchPublicIP(cfg.GoCI.IPDiscoveryURL)
+		if err != nil {
+			return "", err
+		}
+		logger.Info(fmt.Sprintf("Discovered public IP via %s → %s", cfg.GoCI.IPDiscoveryURL, ip))
+		return ip, nil
+	}
+
+	ip, err := resolveIP(cfg.GoCI.DomainToResolve)
+	if err != nil {
+		return "", err
+	}
+	logger.Info(fmt.Sprintf("Resolved %q → %s", cfg.GoCI.DomainToResolve, ip))
+	return ip, nil
+}
+
 // Core logic
 func check(cfg *utils.Config, statePath string) error {
-	// 1. Resolve the current public IP via DNS lookup (same as pinging the domain).
-	currentIP, err := resolveIP(cfg.GoCI.DomainToResolve)
+	// 1. Determine the current public IP (HTTP discovery or DNS lookup).
+	currentIP, err := currentPublicIP(cfg)
 	if err != nil {
 		return fmt.Errorf("resolve IP: %w", err)
 	}
-	logger.Info(fmt.Sprintf("Resolved %q → %s", cfg.GoCI.DomainToResolve, currentIP))
 
 	// 2. Load the last saved IP.
 	state, err := loadIPState(statePath)
@@ -173,8 +232,12 @@ func main() {
 	}
 
 	logger.Info("goci-dns build", "version", Version, "build_date", BuildDate)
+	ipSource := cfg.GoCI.DomainToResolve
+	if cfg.GoCI.UseIPDiscovery {
+		ipSource = cfg.GoCI.IPDiscoveryURL
+	}
 	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, %d Cloudflare record(s) | %d IONOS record(s)",
-		cfg.GoCI.DomainToResolve, len(cfg.CF.CFDNSEntryIDs), len(cfg.IONOS.IONOSEntryIDs)))
+		ipSource, len(cfg.CF.CFDNSEntryIDs), len(cfg.IONOS.IONOSEntryIDs)))
 
 	if cfg.GoCI.TTLMinutesCheckDNSEntries > 0 {
 		// Daemon mode (systemd service)

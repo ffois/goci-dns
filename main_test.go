@@ -1,6 +1,8 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -40,5 +42,41 @@ func TestIPStateRoundTrip(t *testing.T) {
 	}
 	if got.IP != want.IP || !got.UpdatedAt.Equal(want.UpdatedAt) {
 		t.Fatalf("round trip = %+v, want %+v", got, want)
+	}
+}
+
+func TestFetchPublicIP(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		want    string
+		wantErr bool
+	}{
+		{"plain ip", http.StatusOK, "203.0.113.7", "203.0.113.7", false},
+		{"trailing newline", http.StatusOK, "203.0.113.7\n", "203.0.113.7", false},
+		{"ipv6 rejected", http.StatusOK, "2001:db8::1", "", true},
+		{"garbage", http.StatusOK, "<html>", "", true},
+		{"server error", http.StatusInternalServerError, "203.0.113.7", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(tt.status)
+				w.Write([]byte(tt.body))
+			}))
+			defer srv.Close()
+
+			got, err := fetchPublicIP(srv.URL)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %q", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("fetchPublicIP = %q, %v; want %q", got, err, tt.want)
+			}
+		})
 	}
 }

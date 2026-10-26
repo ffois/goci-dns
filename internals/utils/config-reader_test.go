@@ -65,6 +65,15 @@ func TestValidateConfig(t *testing.T) {
 			c.GoCI.OverrideNewIP = true
 			c.GoCI.NewIP = "1.2.3.4"
 		}, ""},
+		{"discovery without domain", func(c *Config) {
+			c.GoCI.DomainToResolve = ""
+			c.GoCI.UseIPDiscovery = true
+			c.GoCI.IPDiscoveryURL = DefaultIPDiscoveryURL
+		}, ""},
+		{"discovery invalid url", func(c *Config) {
+			c.GoCI.UseIPDiscovery = true
+			c.GoCI.IPDiscoveryURL = "api.ipify.org"
+		}, "IP_DISCOVERY_URL"},
 		{"cf default token", func(c *Config) { c.CF.CFToken = "your-cloudflare-api-token" }, "CF_TOKEN"},
 		{"cf account id optional", func(c *Config) { c.CF.CFAccountID = "" }, ""},
 		{"cf no record ids", func(c *Config) { c.CF.CFDNSEntries = " , " }, "CF_DNS_ENTRIES_ID"},
@@ -122,6 +131,31 @@ CF_DNS_ENTRIES_ID = r1, r2
 	}
 	if want := []string{"r1", "r2"}; !reflect.DeepEqual(cfg.CF.CFDNSEntryIDs, want) {
 		t.Errorf("CFDNSEntryIDs = %v, want %v", cfg.CF.CFDNSEntryIDs, want)
+	}
+}
+
+func TestLoadConfigDiscoveryDefaultURL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.ini")
+	content := `[GoCI]
+USE_IP_DISCOVERY = true
+IP_DISCOVERY_URL =
+ENABLE_CLOUDFLARE = true
+
+[CF]
+CF_TOKEN = token
+CF_ZONE_ID = zone
+CF_DNS_ENTRIES_ID = r1
+`
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.GoCI.IPDiscoveryURL != DefaultIPDiscoveryURL {
+		t.Errorf("IPDiscoveryURL = %q, want %q", cfg.GoCI.IPDiscoveryURL, DefaultIPDiscoveryURL)
 	}
 }
 

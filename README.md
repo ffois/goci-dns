@@ -2,7 +2,7 @@
 
 `goci-dns` is a small Go service that keeps Cloudflare and IONOS A records in sync with your current public IP.
 
-It resolves a configured hostname, compares the result with the last known IP in `ip_state.json`, and updates one or more Cloudflare and/or IONOS DNS records when needed.
+It resolves a configured hostname (or, opt-in, asks an HTTP service such as `api.ipify.org`), compares the result with the last known IP in `ip_state.json`, and updates one or more Cloudflare and/or IONOS DNS records when needed.
 
 ## Features
 
@@ -31,7 +31,9 @@ Copy `config.example.ini` to `config.ini` and edit it. The file is split into se
   - `0` = one-shot mode (run once and exit)
   - `>0` = daemon mode (run every N minutes)
 - `IGNORE_OLD_IP` = force update even if IP is unchanged
-- `DOMAIN_TO_RESOLVE` = hostname to resolve for your current public IP
+- `DOMAIN_TO_RESOLVE` = hostname to resolve for your current public IP (ignored when `USE_IP_DISCOVERY=true`)
+- `USE_IP_DISCOVERY` = opt-in: get the public IPv4 from an HTTP service instead of resolving `DOMAIN_TO_RESOLVE` (`true`/`false`, default `false`)
+- `IP_DISCOVERY_URL` = HTTP(S) service returning the bare IP as text (default `https://api.ipify.org`); the request is always made over IPv4
 - `OVERRIDE_NEW_IP` / `NEW_IP` = optional static IP override
 - `ENABLE_CLOUDFLARE` = enable Cloudflare DNS updates (`true`/`false`)
 - `ENABLE_IONOS` = enable IONOS DNS updates (`true`/`false`)
