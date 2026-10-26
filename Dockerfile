@@ -1,5 +1,5 @@
 # --- Build stage ---
-FROM golang:alpine AS builder
+FROM golang:1.27-alpine AS builder
 LABEL authors="Flavio Fois"
 
 WORKDIR /build

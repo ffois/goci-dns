@@ -17,7 +17,7 @@ It resolves a configured hostname (or, opt-in, asks an HTTP service such as `api
 
 ## Requirements
 
-- Go 1.26+ (if building from source)
+- Go 1.27+ (if building from source)
 - At least one provider enabled (Cloudflare, IONOS, or both)
 - For Cloudflare: an API token with **Zone - DNS - Edit** permission, plus the Zone ID and DNS Record ID(s)
 - For IONOS: an API key with DNS edit permission, plus the Zone ID and DNS Record ID(s)
@@ -114,7 +114,7 @@ The repository includes:
 
 Directly used non-stdlib Go modules in this project:
 
-- `github.com/cloudflare/cloudflare-go/v7` (`v7.6.0`) - Apache License 2.0
+- `github.com/cloudflare/cloudflare-go/v7` (`v7.13.1`) - Apache License 2.0
 - `github.com/ffois/go-ionos` (`v1.0.0`) - MIT License
 - `github.com/charmbracelet/huh` (`v1.0.0`) - MIT License
 - `gopkg.in/ini.v1` (`v1.67.3`) - Apache License 2.0
