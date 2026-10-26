@@ -10,8 +10,7 @@ It resolves a configured hostname (or, opt-in, asks an HTTP service such as `api
 - Supports daemon mode (periodic checks in a long-running service)
 - Can force updates even if IP has not changed
 - Can optionally push a fixed override IP instead of the resolved one
-- Updates multiple Cloudflare DNS record IDs in one run
-- Updates multiple IONOS DNS record IDs in one run
+- Updates multiple zones (domains) and record IDs per provider in one run, with optional per-zone credentials
 - Cloudflare and IONOS can be enabled independently or together
 - Interactive setup wizard (`goci-dns setup`) that lists your zones and records and writes `config.ini`
 
@@ -19,8 +18,8 @@ It resolves a configured hostname (or, opt-in, asks an HTTP service such as `api
 
 - Go 1.27+ (if building from source)
 - At least one provider enabled (Cloudflare, IONOS, or both)
-- For Cloudflare: an API token with **Zone - DNS - Edit** permission, plus the Zone ID and DNS Record ID(s)
-- For IONOS: an API key with DNS edit permission, plus the Zone ID and DNS Record ID(s)
+- For Cloudflare: an API token with **Zone - DNS - Edit** permission, plus the Zone ID(s) and DNS Record ID(s)
+- For IONOS: an API key with DNS edit permission, plus the Zone ID(s) and DNS Record ID(s)
 
 ## Configuration
 
@@ -51,17 +50,30 @@ At least one provider must be enabled.
 
 ### `[CF]` (Cloudflare)
 
-- `CF_TOKEN` = Cloudflare API token
-- `CF_ZONE_ID` = Cloudflare zone ID
+- `CF_TOKEN` = Cloudflare API token (default for every zone)
+- `CF_ZONES` = zones and their record IDs: `<zone id>:<record id>,<record id>;<zone id>:<record id>`
+- `CF_ZONE_TOKENS` = optional per-zone tokens that replace `CF_TOKEN`: `<zone id>:<token>;...`
 - `CF_ACCOUNT_ID` = Cloudflare account ID (optional, reserved for future use)
-- `CF_DNS_ENTRIES_ID` = comma-separated record IDs (for example `id1,id2`)
 
 ### `[IONOS]` (IONOS)
 
 - `IONOS_API_URL` = IONOS DNS API base URL (default `https://api.hosting.ionos.com/dns`)
-- `IONOS_API_KEY` = IONOS API key with DNS edit permission
-- `IONOS_ZONE_ID` = IONOS zone ID
-- `IONOS_DNS_ENTRIES_ID` = comma-separated record IDs (for example `id1,id2`)
+- `IONOS_API_KEY` = IONOS API key with DNS edit permission (default for every zone)
+- `IONOS_ZONES` = zones and their record IDs, same format as `CF_ZONES`
+- `IONOS_ZONE_API_KEYS` = optional per-zone API keys that replace `IONOS_API_KEY`: `<zone id>:<prefix>.<secret>;...`
+
+Example with two Cloudflare zones, the second in another account:
+
+```ini
+[CF]
+CF_TOKEN       = token-for-account-1
+CF_ZONES       = 023e105f4ecef8ad9ca31a8372d0c353:372e67954025e0ba6aaa6d586b9e0b59,9a7806061c88ada191ed06f989cc3dac;5b6c9e1f0a7d4e2b8c3f6a1d9e0b7c42:0f1e2d3c4b5a69788796a5b4c3d2e1f0
+CF_ZONE_TOKENS = 5b6c9e1f0a7d4e2b8c3f6a1d9e0b7c42:token-for-account-2
+```
+
+Do not put a space before `;`: ` ;` starts an ini comment, so goci-dns rejects it instead of silently dropping zones. A failing zone does not stop the others; the run is reported as failed and retried next time.
+
+The old single-zone keys (`CF_ZONE_ID` + `CF_DNS_ENTRIES_ID`, `IONOS_ZONE_ID` + `IONOS_DNS_ENTRIES_ID`) still work and are added as one more zone, so existing configs need no change.
 
 ## Build
 
