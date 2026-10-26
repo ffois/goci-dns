@@ -82,6 +82,14 @@ Set `TTL_MINUTES_CHECK_DNS_ENTRIES = 0`, then schedule runs using `crontab.examp
 
 Set `TTL_MINUTES_CHECK_DNS_ENTRIES > 0`, then install `goci-dns.service`.
 
+### Docker
+
+The image does not contain `config.ini`: mount it at runtime. `docker-compose.yml` mounts `./config.ini` read-only at `/config/config.ini`, keeps `ip_state.json` in the `data` volume (`/data`) and the rotating log file in the `logs` volume (`/logs`):
+
+```bash
+docker compose up -d --build
+```
+
 The repository includes:
 
 - `goci-dns.service` (service unit example)

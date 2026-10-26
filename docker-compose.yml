@@ -3,6 +3,8 @@ services:
     build: .
     restart: unless-stopped
     volumes:
+      - ./config.ini:/config/config.ini:ro
+      - data:/data
       - logs:/logs
     logging:
       driver: "json-file"
@@ -11,4 +13,5 @@ services:
         max-file: "5"
 
 volumes:
+  data:
   logs:

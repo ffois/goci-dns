@@ -16,12 +16,14 @@ WORKDIR /app
 
 # Copia il binario Linux amd64 dai dist artifacts di GitHub Actions
 COPY dist/goci-dns-linux-amd64 ./goci-dns
-COPY config*.ini ./
 COPY docker/entrypoint.sh /entrypoint.sh
 
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
-RUN [ -f /app/config.ini ] || cp /app/config.example.ini /app/config.ini 2>/dev/null || touch /app/config.ini
-RUN mkdir -p /logs
+RUN mkdir -p /config /data /logs
 RUN chmod +x ./goci-dns
+
+# config.ini va montato in /config, lo stato persiste nel volume /data.
+# Il logger scrive il file con rotazione sotto $XDG_CONFIG_HOME/goci-dns/logs.
+ENV XDG_CONFIG_HOME=/logs
 
 ENTRYPOINT ["/entrypoint.sh"]

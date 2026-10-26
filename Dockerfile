@@ -9,9 +9,6 @@ RUN go mod download
 
 COPY . .
 
-# Keep build resilient if config.ini is not committed/present.
-RUN [ -f config.ini ] || touch config.ini
-
 ARG VERSION=dev
 ARG BUILD_DATE=unknown
 
@@ -35,11 +32,13 @@ RUN apk --no-cache add ca-certificates tzdata
 WORKDIR /app
 
 COPY --from=builder /build/goci-dns .
-COPY --from=builder /build/config.ini .
 
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
-RUN mkdir -p /logs
+RUN mkdir -p /config /data /logs
+
+# The logger writes its rotating file under $XDG_CONFIG_HOME/goci-dns/logs.
+ENV XDG_CONFIG_HOME=/logs
 
 ENTRYPOINT ["/entrypoint.sh"]

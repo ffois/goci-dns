@@ -32,3 +32,5 @@ LICENSE
 
 # IP State
 ip_state.json
+# Local config (mounted at runtime)
+config.ini
