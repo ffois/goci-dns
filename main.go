@@ -15,6 +15,12 @@ import (
 	"goci-dns/internals/utils"
 )
 
+// Version and BuildDate are set at build time via -ldflags "-X main.Version=… -X main.BuildDate=…".
+var (
+	Version   = "dev"
+	BuildDate = "unknown"
+)
+
 // IPState is persisted to ip_state.json to remember the last known IP.
 type IPState struct {
 	IP        string    `json:"ip"`
@@ -163,6 +169,7 @@ func main() {
 		logger.Info("IONOS DNS entries enabled")
 	}
 
+	logger.Info("goci-dns build", "version", Version, "build_date", BuildDate)
 	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, %d Cloudflare record(s) | %d IONOS record(s)",
 		cfg.GoCI.DomainToResolve, len(cfg.CF.CFDNSEntryIDs), len(cfg.IONOS.IONOSEntryIDs)))
 
