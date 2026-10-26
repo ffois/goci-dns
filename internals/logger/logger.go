@@ -45,18 +45,37 @@ var (
 
 // InitLogger sets up the global structured logger.
 // It writes JSON to both os.Stdout and a rotating log file at
-// %APPDATA%/EMLy/logs/app.log. Rotation: 10 MB max, 5 backups, 28 days,
-// gzip-compressed old files.
+// <UserConfigDir>/<appName>/logs/app.log. Rotation: 10 MB max, 5 backups,
+// 28 days, gzip-compressed old files.
+// If the log file cannot be created, the logger still writes to os.Stdout
+// and the error is returned.
 // The log level is read from the LOG_LEVEL env var (DEBUG|INFO|WARN|ERROR).
 func InitLogger(appName string) error {
+	// Parse log level from environment
+	setLevelFromEnv()
+
+	logPath, err := openLogFile(appName)
+	if err != nil {
+		setHandler(os.Stdout)
+		Logger.Warn("log file unavailable, logging to stdout only", "error", err.Error())
+		return err
+	}
+
+	setHandler(io.MultiWriter(os.Stdout, rotator))
+	Logger.Info("logger initialised", "log_file", logPath, "level", levelVar.Level().String())
+	return nil
+}
+
+// openLogFile creates the logs directory and the rotating file writer.
+func openLogFile(appName string) (string, error) {
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return fmt.Errorf("logger: user config dir: %w", err)
+		return "", fmt.Errorf("logger: user config dir: %w", err)
 	}
 
 	logsDir := filepath.Join(configDir, appName, "logs")
 	if err := os.MkdirAll(logsDir, 0755); err != nil {
-		return fmt.Errorf("logger: create logs dir: %w", err)
+		return "", fmt.Errorf("logger: create logs dir: %w", err)
 	}
 
 	logPath := filepath.Join(logsDir, "app.log")
@@ -68,21 +87,18 @@ func InitLogger(appName string) error {
 		MaxAge:     28,   // days
 		Compress:   true, // gzip old files
 	}
+	return logPath, nil
+}
 
-	// Parse log level from environment
-	setLevelFromEnv()
-
-	multi := io.MultiWriter(os.Stdout, rotator)
-	handler := slog.NewJSONHandler(multi, &slog.HandlerOptions{
+// setHandler installs a JSON handler writing to w as the global logger.
+func setHandler(w io.Writer) {
+	handler := slog.NewJSONHandler(w, &slog.HandlerOptions{
 		Level:       &levelVar,
 		ReplaceAttr: replaceAttr,
 	})
 
 	Logger = slog.New(handler)
 	slog.SetDefault(Logger)
-
-	Logger.Info("logger initialised", "log_file", logPath, "level", levelVar.Level().String())
-	return nil
 }
 
 // SetLevelFromString dynamically adjusts the log level.
@@ -123,8 +139,14 @@ func Warn(msg string, args ...any) { logWithCaller(slog.LevelWarn, msg, args...)
 // Error logs at ERROR level.
 func Error(msg string, args ...any) { logWithCaller(slog.LevelError, msg, args...) }
 
+// Fatal logs at ERROR level and exits with status 1.
+// If the logger is not initialised, msg is written to os.Stderr instead.
 func Fatal(msg string, args ...any) {
-	logWithCaller(slog.LevelError, msg, args...)
+	if Logger == nil {
+		fmt.Fprintln(os.Stderr, append([]any{msg}, args...)...)
+	} else {
+		logWithCaller(slog.LevelError, msg, args...)
+	}
 	os.Exit(1)
 }
 

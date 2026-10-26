@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -137,9 +136,8 @@ func check(cfg *utils.Config, statePath string) error {
 }
 
 func main() {
-	if err := logger.InitLogger("goci-dns"); err != nil {
-		log.Println("Error initializing logger:", err)
-	}
+	// On error the logger falls back to stdout and reports it itself.
+	_ = logger.InitLogger("goci-dns")
 	defer logger.CloseLogger()
 
 	// Usage: goci-dns [config.ini [ip_state.json]]
