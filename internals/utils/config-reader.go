@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"goci-dns/internals/logger"
 	"net/url"
+	"os"
+	"slices"
 	"strings"
 
 	"gopkg.in/ini.v1"
@@ -35,29 +37,58 @@ type GoCIConfig struct {
 	EnableCloudflare          bool   `ini:"ENABLE_CLOUDFLARE"`
 }
 
-// CFConfig maps the [CF] section.
-type CFConfig struct {
-	CFToken       string   `ini:"CF_TOKEN"`
-	CFZoneID      string   `ini:"CF_ZONE_ID"`
-	CFAccountID   string   `ini:"CF_ACCOUNT_ID"`
-	CFDNSEntries  string   `ini:"CF_DNS_ENTRIES_ID"` // raw value from INI
-	CFDNSEntryIDs []string `ini:"-"`                 // parsed IDs from CFDNSEntries
+// ZoneEntry is one zone and the A records to update in it.
+type ZoneEntry struct {
+	ZoneID    string
+	RecordIDs []string
+	// Credential is the API token (Cloudflare) or API key (IONOS) used for
+	// this zone: the per-zone override if set, else the provider default.
+	Credential string
 }
 
+// CFConfig maps the [CF] section.
+type CFConfig struct {
+	CFToken      string `ini:"CF_TOKEN"`
+	CFZones      string `ini:"CF_ZONES"`       // raw value: zone:rec1,rec2;zone2:rec3
+	CFZoneTokens string `ini:"CF_ZONE_TOKENS"` // raw value: zone:token;zone2:token2
+	CFAccountID  string `ini:"CF_ACCOUNT_ID"`
+
+	// Legacy single-zone keys, still accepted: they add one more zone.
+	CFZoneID     string `ini:"CF_ZONE_ID"`
+	CFDNSEntries string `ini:"CF_DNS_ENTRIES_ID"`
+
+	Zones []ZoneEntry `ini:"-"` // built by ValidateConfig from the keys above
+}
+
+// IONOSConfig maps the [IONOS] section.
 type IONOSConfig struct {
-	IONOSApiUrl   string   `ini:"IONOS_API_URL"`
-	IONOSApiKey   string   `ini:"IONOS_API_KEY"`
-	IONOSZoneID   string   `ini:"IONOS_ZONE_ID"`
-	IONOSEntries  string   `ini:"IONOS_DNS_ENTRIES_ID"` // raw value from INI
-	IONOSEntryIDs []string `ini:"-"`                    // parsed IDs from IONOSEntries
+	IONOSApiUrl      string `ini:"IONOS_API_URL"`
+	IONOSApiKey      string `ini:"IONOS_API_KEY"`
+	IONOSZones       string `ini:"IONOS_ZONES"`         // raw value: zone:rec1,rec2;zone2:rec3
+	IONOSZoneApiKeys string `ini:"IONOS_ZONE_API_KEYS"` // raw value: zone:key;zone2:key2
+
+	// Legacy single-zone keys, still accepted: they add one more zone.
+	IONOSZoneID  string `ini:"IONOS_ZONE_ID"`
+	IONOSEntries string `ini:"IONOS_DNS_ENTRIES_ID"`
+
+	Zones []ZoneEntry `ini:"-"` // built by ValidateConfig from the keys above
 }
 
 // LoadConfig reads the config.ini file at the given path and returns a Config struct
 func LoadConfig(path string) (*Config, error) {
 	logger.Log("LoadConfig path:", path)
-	cfg, err := ini.LoadSources(ini.LoadOptions{}, path)
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		logger.Log("Fail to read file:", err)
+		return nil, err
+	}
+	if err := checkZoneSeparators(raw); err != nil {
+		return nil, err
+	}
+	// ';' separates zones, so only " ;" and " #" start an inline comment.
+	cfg, err := ini.LoadSources(ini.LoadOptions{SpaceBeforeInlineComment: true}, raw)
+	if err != nil {
+		logger.Log("Fail to parse file:", err)
 		return nil, err
 	}
 
@@ -69,13 +100,6 @@ func LoadConfig(path string) (*Config, error) {
 
 	if config.GoCI.UseIPDiscovery && strings.TrimSpace(config.GoCI.IPDiscoveryURL) == "" {
 		config.GoCI.IPDiscoveryURL = DefaultIPDiscoveryURL
-	}
-
-	if config.GoCI.EnableIONOS {
-		config.IONOS.IONOSEntryIDs = parseDNSEntryIDs(config.IONOS.IONOSEntries)
-	}
-	if config.GoCI.EnableCloudflare {
-		config.CF.CFDNSEntryIDs = parseDNSEntryIDs(config.CF.CFDNSEntries)
 	}
 
 	if valid, err := ValidateConfig(config); !valid {
@@ -120,26 +144,15 @@ func ValidateConfig(config *Config) (bool, error) {
 
 	// [CF]
 	if config.GoCI.EnableCloudflare {
-		if isDefault(config.CF.CFToken) {
-			return false, fmt.Errorf("CF.CF_TOKEN is empty or default")
+		zones, err := buildZones(zoneKeys{
+			section: "CF", zones: "CF_ZONES", creds: "CF_ZONE_TOKENS", cred: "CF_TOKEN",
+			legacyZone: "CF_ZONE_ID", legacyEntries: "CF_DNS_ENTRIES_ID",
+		}, config.CF.CFZones, config.CF.CFZoneTokens, config.CF.CFToken,
+			config.CF.CFZoneID, config.CF.CFDNSEntries, isDefault)
+		if err != nil {
+			return false, err
 		}
-		if isDefault(config.CF.CFZoneID) {
-			return false, fmt.Errorf("CF.CF_ZONE_ID is empty or default")
-		}
-		if isDefault(config.CF.CFDNSEntries) {
-			return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID is empty or default")
-		}
-		if len(config.CF.CFDNSEntryIDs) == 0 {
-			config.CF.CFDNSEntryIDs = parseDNSEntryIDs(config.CF.CFDNSEntries)
-		}
-		if len(config.CF.CFDNSEntryIDs) == 0 {
-			return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID must contain at least one record id")
-		}
-		for _, id := range config.CF.CFDNSEntryIDs {
-			if isDefault(id) {
-				return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID contains default value")
-			}
-		}
+		config.CF.Zones = zones
 	}
 
 	// [IONOS]
@@ -147,26 +160,15 @@ func ValidateConfig(config *Config) (bool, error) {
 		if isDefault(config.IONOS.IONOSApiUrl) {
 			return false, fmt.Errorf("IONOS.IONOS_API_URL is empty or default")
 		}
-		if isDefault(config.IONOS.IONOSApiKey) {
-			return false, fmt.Errorf("IONOS.IONOS_API_KEY is empty or default")
+		zones, err := buildZones(zoneKeys{
+			section: "IONOS", zones: "IONOS_ZONES", creds: "IONOS_ZONE_API_KEYS", cred: "IONOS_API_KEY",
+			legacyZone: "IONOS_ZONE_ID", legacyEntries: "IONOS_DNS_ENTRIES_ID",
+		}, config.IONOS.IONOSZones, config.IONOS.IONOSZoneApiKeys, config.IONOS.IONOSApiKey,
+			config.IONOS.IONOSZoneID, config.IONOS.IONOSEntries, isDefault)
+		if err != nil {
+			return false, err
 		}
-		if isDefault(config.IONOS.IONOSZoneID) {
-			return false, fmt.Errorf("IONOS.IONOS_ZONE_ID is empty or default")
-		}
-		if isDefault(config.IONOS.IONOSEntries) {
-			return false, fmt.Errorf("IONOS.IONOS_DNS_ENTRIES_ID is empty or default")
-		}
-		if len(config.IONOS.IONOSEntryIDs) == 0 {
-			config.IONOS.IONOSEntryIDs = parseDNSEntryIDs(config.IONOS.IONOSEntries)
-		}
-		if len(config.IONOS.IONOSEntryIDs) == 0 {
-			return false, fmt.Errorf("IONOS.IONOS_DNS_ENTRIES_ID must contain at least one record id")
-		}
-		for _, id := range config.IONOS.IONOSEntryIDs {
-			if isDefault(id) {
-				return false, fmt.Errorf("IONOS.IONOS_DNS_ENTRIES_ID contains default value")
-			}
-		}
+		config.IONOS.Zones = zones
 	}
 
 	return true, nil
@@ -181,4 +183,143 @@ func parseDNSEntryIDs(raw string) []string {
 		}
 	}
 	return entries
+}
+
+// multiZoneKeys hold ';'-separated lists.
+var multiZoneKeys = []string{"CF_ZONES", "CF_ZONE_TOKENS", "IONOS_ZONES", "IONOS_ZONE_API_KEYS"}
+
+// checkZoneSeparators rejects a multi-zone key with a space before ';'.
+// ini would read the rest of the line as a comment and silently drop zones.
+func checkZoneSeparators(raw []byte) error {
+	for n, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok || !slices.Contains(multiZoneKeys, strings.TrimSpace(key)) {
+			continue
+		}
+		if strings.Contains(strings.TrimRight(value, " \t\r"), " ;") || strings.Contains(value, "\t;") {
+			return fmt.Errorf("line %d: %s: remove the space before ';' (it would start a comment)", n+1, strings.TrimSpace(key))
+		}
+	}
+	return nil
+}
+
+// zoneKeys names the ini keys of one provider, for error messages.
+type zoneKeys struct {
+	section       string
+	zones         string // e.g. CF_ZONES
+	creds         string // e.g. CF_ZONE_TOKENS
+	cred          string // e.g. CF_TOKEN
+	legacyZone    string // e.g. CF_ZONE_ID
+	legacyEntries string // e.g. CF_DNS_ENTRIES_ID
+}
+
+// buildZones merges the multi-zone key and the legacy single-zone keys of a
+// provider into one list, with the credential resolved for every zone.
+// A zone listed more than once gets the union of its record IDs.
+func buildZones(k zoneKeys, zonesRaw, credsRaw, defaultCred, legacyZone, legacyEntries string, isDefault func(string) bool) ([]ZoneEntry, error) {
+	parsed, err := parseZones(zonesRaw)
+	if err != nil {
+		return nil, fmt.Errorf("%s.%s: %w", k.section, k.zones, err)
+	}
+
+	if strings.TrimSpace(legacyZone) != "" || strings.TrimSpace(legacyEntries) != "" {
+		if isDefault(legacyZone) {
+			return nil, fmt.Errorf("%s.%s is empty or default", k.section, k.legacyZone)
+		}
+		ids := parseDNSEntryIDs(legacyEntries)
+		if len(ids) == 0 {
+			return nil, fmt.Errorf("%s.%s must contain at least one record id", k.section, k.legacyEntries)
+		}
+		parsed = append(parsed, ZoneEntry{ZoneID: strings.TrimSpace(legacyZone), RecordIDs: ids})
+	}
+
+	var zones []ZoneEntry
+	index := make(map[string]int) // zone ID -> position in zones
+	for _, z := range parsed {
+		if isDefault(z.ZoneID) {
+			return nil, fmt.Errorf("%s.%s contains a default zone id", k.section, k.zones)
+		}
+		i, ok := index[z.ZoneID]
+		if !ok {
+			i = len(zones)
+			index[z.ZoneID] = i
+			zones = append(zones, ZoneEntry{ZoneID: z.ZoneID})
+		}
+		for _, id := range z.RecordIDs {
+			if isDefault(id) {
+				return nil, fmt.Errorf("%s: zone %s contains a default record id", k.section, z.ZoneID)
+			}
+			if !slices.Contains(zones[i].RecordIDs, id) {
+				zones[i].RecordIDs = append(zones[i].RecordIDs, id)
+			}
+		}
+	}
+	if len(zones) == 0 {
+		return nil, fmt.Errorf("%s: no zones configured: set %s.%s", k.section, k.section, k.zones)
+	}
+
+	creds, err := parseZoneCredentials(credsRaw)
+	if err != nil {
+		return nil, fmt.Errorf("%s.%s: %w", k.section, k.creds, err)
+	}
+	for zoneID := range creds {
+		if _, ok := index[zoneID]; !ok {
+			return nil, fmt.Errorf("%s.%s: zone %s is not configured", k.section, k.creds, zoneID)
+		}
+	}
+	for i := range zones {
+		cred, ok := creds[zones[i].ZoneID]
+		if !ok {
+			cred = strings.TrimSpace(defaultCred)
+		}
+		if isDefault(cred) {
+			return nil, fmt.Errorf("%s.%s is empty or default (needed by zone %s)", k.section, k.cred, zones[i].ZoneID)
+		}
+		zones[i].Credential = cred
+	}
+	return zones, nil
+}
+
+// parseZones parses "zone:rec1,rec2;zone2:rec3". Credentials are left empty.
+func parseZones(raw string) ([]ZoneEntry, error) {
+	var zones []ZoneEntry
+	for _, part := range strings.Split(raw, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		zoneID, records, ok := strings.Cut(part, ":")
+		zoneID = strings.TrimSpace(zoneID)
+		if !ok || zoneID == "" {
+			return nil, fmt.Errorf("%q: expected <zone id>:<record id>[,<record id>...]", part)
+		}
+		ids := parseDNSEntryIDs(records)
+		if len(ids) == 0 {
+			return nil, fmt.Errorf("zone %s has no record ids", zoneID)
+		}
+		zones = append(zones, ZoneEntry{ZoneID: zoneID, RecordIDs: ids})
+	}
+	return zones, nil
+}
+
+// parseZoneCredentials parses "zone:credential;zone2:credential2".
+func parseZoneCredentials(raw string) (map[string]string, error) {
+	creds := make(map[string]string)
+	for _, part := range strings.Split(raw, ";") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		zoneID, cred, ok := strings.Cut(part, ":")
+		zoneID, cred = strings.TrimSpace(zoneID), strings.TrimSpace(cred)
+		if !ok || zoneID == "" || cred == "" {
+			// Do not echo part: it contains a secret.
+			return nil, fmt.Errorf("expected <zone id>:<credential> entries separated by ';'")
+		}
+		if _, dup := creds[zoneID]; dup {
+			return nil, fmt.Errorf("zone %s listed twice", zoneID)
+		}
+		creds[zoneID] = cred
+	}
+	return creds, nil
 }

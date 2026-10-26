@@ -3,6 +3,7 @@ package cf
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,21 +18,35 @@ import (
 const (
 	// requestTimeout bounds a single Cloudflare API request.
 	requestTimeout = 15 * time.Second
-	// runTimeout bounds a whole UpdateDNS call (listing + all updates).
+	// runTimeout bounds the update of one zone (listing + all updates).
 	runTimeout = 2 * time.Minute
 )
 
-// UpdateDNS iterates over every DNS record ID in cfg and PUTs the new IP.
-// It first lists all zone records (across every page) so it can preserve the record name.
+// UpdateDNS updates every configured zone. A failing zone does not stop the
+// others; all errors are returned together.
 func UpdateDNS(cfg *utils.Config, newIP string) error {
-	client := newClient(cfg.CF.CFToken)
+	logger.Debug("[CF] updating zones", "count", len(cfg.CF.Zones))
+	var errs []error
+	for _, zone := range cfg.CF.Zones {
+		if err := updateZone(zone, newIP); err != nil {
+			logger.Error(fmt.Sprintf("[CF] zone %s failed", zone.ZoneID), "error", err.Error())
+			errs = append(errs, fmt.Errorf("zone %s: %w", zone.ZoneID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// updateZone PUTs the new IP on every record of zone. It first lists all zone
+// records (across every page) so it can preserve the record name, TTL and proxied flag.
+func updateZone(zone utils.ZoneEntry, newIP string) error {
+	client := newClient(zone.Credential)
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	defer cancel()
 
 	// Walk every page of the zone so records beyond the first page are found too.
 	currentRecords := make(map[string]dns.RecordResponse)
 	iter := client.DNS.Records.ListAutoPaging(ctx, dns.RecordListParams{
-		ZoneID: cloudflare.F(cfg.CF.CFZoneID),
+		ZoneID: cloudflare.F(zone.ZoneID),
 	})
 	for iter.Next() {
 		r := iter.Current()
@@ -40,9 +55,9 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 	if err := iter.Err(); err != nil {
 		return fmt.Errorf("list records: %w", err)
 	}
-	logger.Debug("[CF] zone records listed", "zone_id", cfg.CF.CFZoneID, "count", len(currentRecords))
+	logger.Debug("[CF] zone records listed", "zone_id", zone.ZoneID, "count", len(currentRecords))
 
-	for _, recordID := range cfg.CF.CFDNSEntryIDs {
+	for _, recordID := range zone.RecordIDs {
 		recordID = strings.TrimSpace(recordID)
 		if recordID == "" {
 			continue
@@ -50,25 +65,25 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 
 		existing, ok := currentRecords[recordID]
 		if !ok {
-			logger.Warn(fmt.Sprintf("[CF:%s] record not found in zone – skipping", recordID))
+			logger.Warn(fmt.Sprintf("[CF:%s/%s] record not found in zone – skipping", zone.ZoneID, recordID))
 			continue
 		}
 		if existing.Type != dns.RecordResponseTypeA {
-			logger.Warn(fmt.Sprintf("[CF:%s] record type is %s, not A – skipping", recordID, existing.Type))
+			logger.Warn(fmt.Sprintf("[CF:%s/%s] record type is %s, not A – skipping", zone.ZoneID, recordID, existing.Type))
 			continue
 		}
 		recordName := existing.Name
 
-		logger.Info(fmt.Sprintf("[CF:%s] current name=%q content=%s → new content=%s", recordID, recordName, existing.Content, newIP))
+		logger.Info(fmt.Sprintf("[CF:%s/%s] current name=%q content=%s → new content=%s", zone.ZoneID, recordID, recordName, existing.Content, newIP))
 
 		if existing.Content == newIP {
-			logger.Info(fmt.Sprintf("[CF:%s] content already matches new IP %s – skipping update", recordID, newIP))
+			logger.Info(fmt.Sprintf("[CF:%s/%s] content already matches new IP %s – skipping update", zone.ZoneID, recordID, newIP))
 			continue
 		}
 
 		// PUT – overwrite with the new IP, keeping the same name.
 		_, err := client.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
-			ZoneID: cloudflare.F(cfg.CF.CFZoneID),
+			ZoneID: cloudflare.F(zone.ZoneID),
 			Body: dns.ARecordParam{
 				Name:    cloudflare.F(recordName),
 				Type:    cloudflare.F(dns.ARecordTypeA),
@@ -81,7 +96,7 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 			return fmt.Errorf("update record %q: %w", recordID, err)
 		}
 
-		logger.Info(fmt.Sprintf("[CF:%s] success: updated to %s", recordID, newIP))
+		logger.Info(fmt.Sprintf("[CF:%s/%s] success: updated to %s", zone.ZoneID, recordID, newIP))
 	}
 
 	return nil

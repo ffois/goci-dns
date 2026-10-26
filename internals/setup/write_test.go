@@ -20,15 +20,14 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 		},
 		CF: utils.CFConfig{
 			CFToken:      "cf-token",
-			CFZoneID:     "cf-zone",
 			CFAccountID:  "cf-account",
-			CFDNSEntries: "r1,r2",
+			CFZones:      "z1:r1,r2;z2:r3",
+			CFZoneTokens: "z2:other-token",
 		},
 		IONOS: utils.IONOSConfig{
-			IONOSApiUrl:  utils.DefaultIONOSApiURL,
-			IONOSApiKey:  "prefix.secret",
-			IONOSZoneID:  "ionos-zone",
-			IONOSEntries: "i1",
+			IONOSApiUrl: utils.DefaultIONOSApiURL,
+			IONOSApiKey: "prefix.secret",
+			IONOSZones:  "ionos-zone:i1",
 		},
 	}
 
@@ -52,10 +51,15 @@ func TestWriteConfigRoundTrip(t *testing.T) {
 	if got.GoCI != cfg.GoCI {
 		t.Errorf("GoCI = %+v, want %+v", got.GoCI, cfg.GoCI)
 	}
-	if got.CF.CFToken != "cf-token" || got.CF.CFZoneID != "cf-zone" || !reflect.DeepEqual(got.CF.CFDNSEntryIDs, []string{"r1", "r2"}) {
+	wantCF := []utils.ZoneEntry{
+		{ZoneID: "z1", RecordIDs: []string{"r1", "r2"}, Credential: "cf-token"},
+		{ZoneID: "z2", RecordIDs: []string{"r3"}, Credential: "other-token"},
+	}
+	if got.CF.CFAccountID != "cf-account" || !reflect.DeepEqual(got.CF.Zones, wantCF) {
 		t.Errorf("CF = %+v", got.CF)
 	}
-	if got.IONOS.IONOSApiKey != "prefix.secret" || got.IONOS.IONOSZoneID != "ionos-zone" || !reflect.DeepEqual(got.IONOS.IONOSEntryIDs, []string{"i1"}) {
+	wantIONOS := []utils.ZoneEntry{{ZoneID: "ionos-zone", RecordIDs: []string{"i1"}, Credential: "prefix.secret"}}
+	if !reflect.DeepEqual(got.IONOS.Zones, wantIONOS) {
 		t.Errorf("IONOS = %+v", got.IONOS)
 	}
 }

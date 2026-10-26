@@ -17,12 +17,24 @@ import (
 
 const newIP = "203.0.113.7"
 
-// fakeCF serves a two-page DNS record listing and records every PUT body.
+// fakeCF serves paged DNS record listings per zone and records every PUT
+// body (keyed by record ID) and the token used for each zone.
 type fakeCF struct {
-	pages [][]map[string]any
+	pages map[string][][]map[string]any // zone ID -> pages
 
 	mu      sync.Mutex
 	updates map[string]map[string]any
+	tokens  map[string]string // zone ID -> bearer token
+}
+
+// zonePath splits "/zones/<zone>/dns_records[/<record>]".
+func zonePath(path string) (zone, rest string, ok bool) {
+	after, found := strings.CutPrefix(path, "/zones/")
+	if !found {
+		return "", "", false
+	}
+	zone, rest, found = strings.Cut(after, "/dns_records")
+	return zone, strings.TrimPrefix(rest, "/"), found
 }
 
 func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -42,20 +54,29 @@ func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"result":      result,
 			"result_info": map[string]any{"page": 1, "per_page": 50},
 		})
-	case r.Method == http.MethodGet && r.URL.Path == "/zones/zone/dns_records":
+	case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/dns_records"):
+		zone, _, _ := zonePath(r.URL.Path)
+		pages, known := f.pages[zone]
+		if !known {
+			http.Error(w, `{"success":false,"errors":[{"code":7003,"message":"Could not route"}]}`, http.StatusBadRequest)
+			return
+		}
+		f.mu.Lock()
+		f.tokens[zone] = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		f.mu.Unlock()
 		page := 1
 		fmt.Sscanf(r.URL.Query().Get("page"), "%d", &page)
 		result := []map[string]any{}
-		if page >= 1 && page <= len(f.pages) {
-			result = f.pages[page-1]
+		if page >= 1 && page <= len(pages) {
+			result = pages[page-1]
 		}
 		json.NewEncoder(w).Encode(map[string]any{
 			"success": true, "errors": []any{}, "messages": []any{},
 			"result":      result,
 			"result_info": map[string]any{"page": page, "per_page": 2},
 		})
-	case r.Method == http.MethodPut && strings.HasPrefix(r.URL.Path, "/zones/zone/dns_records/"):
-		id := strings.TrimPrefix(r.URL.Path, "/zones/zone/dns_records/")
+	case r.Method == http.MethodPut && strings.Contains(r.URL.Path, "/dns_records/"):
+		_, id, _ := zonePath(r.URL.Path)
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
 		f.mu.Lock()
@@ -77,29 +98,30 @@ func record(id, typ, content string, ttl int, proxied bool) map[string]any {
 	}
 }
 
+func newFake(pages map[string][][]map[string]any) *fakeCF {
+	return &fakeCF{pages: pages, updates: map[string]map[string]any{}, tokens: map[string]string{}}
+}
+
 func TestUpdateDNS(t *testing.T) {
-	fake := &fakeCF{
-		pages: [][]map[string]any{
-			{
-				record("page1", "A", "198.51.100.1", 300, true),
-				record("same", "A", newIP, 1, false),
-			},
-			{
-				record("page2", "A", "198.51.100.1", 1, false),
-				record("aaaa", "AAAA", "2001:db8::1", 1, false),
-			},
+	fake := newFake(map[string][][]map[string]any{"zone": {
+		{
+			record("page1", "A", "198.51.100.1", 300, true),
+			record("same", "A", newIP, 1, false),
 		},
-		updates: map[string]map[string]any{},
-	}
+		{
+			record("page2", "A", "198.51.100.1", 1, false),
+			record("aaaa", "AAAA", "2001:db8::1", 1, false),
+		},
+	}})
 	srv := httptest.NewServer(fake)
 	defer srv.Close()
 	t.Setenv("CLOUDFLARE_BASE_URL", srv.URL+"/")
 
-	cfg := &utils.Config{CF: utils.CFConfig{
-		CFToken:       "token",
-		CFZoneID:      "zone",
-		CFDNSEntryIDs: []string{"page1", "same", "page2", "aaaa", "missing", " "},
-	}}
+	cfg := &utils.Config{CF: utils.CFConfig{Zones: []utils.ZoneEntry{{
+		ZoneID:     "zone",
+		RecordIDs:  []string{"page1", "same", "page2", "aaaa", "missing", " "},
+		Credential: "token",
+	}}}}
 
 	if err := UpdateDNS(cfg, newIP); err != nil {
 		t.Fatalf("UpdateDNS: %v", err)
@@ -124,14 +146,41 @@ func TestUpdateDNS(t *testing.T) {
 	}
 }
 
-func TestListZonesAndARecords(t *testing.T) {
-	fake := &fakeCF{
-		pages: [][]map[string]any{
-			{record("a1", "A", "198.51.100.1", 1, false)},
-			{record("aaaa", "AAAA", "2001:db8::1", 1, false), record("a2", "A", "198.51.100.2", 1, false)},
-		},
-		updates: map[string]map[string]any{},
+func TestUpdateDNSMultipleZones(t *testing.T) {
+	fake := newFake(map[string][][]map[string]any{
+		"z1": {{record("r1", "A", "198.51.100.1", 1, false)}},
+		"z2": {{record("r2", "A", "198.51.100.1", 1, false)}},
+	})
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	t.Setenv("CLOUDFLARE_BASE_URL", srv.URL+"/")
+
+	cfg := &utils.Config{CF: utils.CFConfig{Zones: []utils.ZoneEntry{
+		{ZoneID: "broken", RecordIDs: []string{"x"}, Credential: "token-a"},
+		{ZoneID: "z1", RecordIDs: []string{"r1"}, Credential: "token-a"},
+		{ZoneID: "z2", RecordIDs: []string{"r2"}, Credential: "token-b"},
+	}}}
+
+	err := UpdateDNS(cfg, newIP)
+	if err == nil || !strings.Contains(err.Error(), "zone broken") {
+		t.Fatalf("err = %v, want an error for zone broken", err)
 	}
+	// The failing zone must not stop the others.
+	for _, id := range []string{"r1", "r2"} {
+		if u, ok := fake.updates[id]; !ok || u["content"] != newIP {
+			t.Errorf("%s update = %v (found=%v)", id, u, ok)
+		}
+	}
+	if want := map[string]string{"z1": "token-a", "z2": "token-b"}; !reflect.DeepEqual(fake.tokens, want) {
+		t.Errorf("tokens = %v, want %v", fake.tokens, want)
+	}
+}
+
+func TestListZonesAndARecords(t *testing.T) {
+	fake := newFake(map[string][][]map[string]any{"zone": {
+		{record("a1", "A", "198.51.100.1", 1, false)},
+		{record("aaaa", "AAAA", "2001:db8::1", 1, false), record("a2", "A", "198.51.100.2", 1, false)},
+	}})
 	srv := httptest.NewServer(fake)
 	defer srv.Close()
 	t.Setenv("CLOUDFLARE_BASE_URL", srv.URL+"/")

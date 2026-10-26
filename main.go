@@ -251,8 +251,8 @@ func main() {
 	if cfg.GoCI.UseIPDiscovery {
 		ipSource = cfg.GoCI.IPDiscoveryURL
 	}
-	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, %d Cloudflare record(s) | %d IONOS record(s)",
-		ipSource, len(cfg.CF.CFDNSEntryIDs), len(cfg.IONOS.IONOSEntryIDs)))
+	logger.Info(fmt.Sprintf("goci-dns started – monitoring %q, Cloudflare: %d zone(s), %d record(s) | IONOS: %d zone(s), %d record(s)",
+		ipSource, len(cfg.CF.Zones), countRecords(cfg.CF.Zones), len(cfg.IONOS.Zones), countRecords(cfg.IONOS.Zones)))
 
 	if cfg.GoCI.TTLMinutesCheckDNSEntries > 0 {
 		// Daemon mode (systemd service)
@@ -319,19 +319,31 @@ func logConfig(cfg *utils.Config, configPath, statePath string) {
 		"enable_ionos", cfg.GoCI.EnableIONOS,
 	)
 	if cfg.GoCI.EnableCloudflare {
-		logger.Debug("cloudflare config",
-			"token", logger.Redacted(cfg.CF.CFToken),
-			"zone_id", cfg.CF.CFZoneID,
-			"account_id", cfg.CF.CFAccountID,
-			"record_ids", cfg.CF.CFDNSEntryIDs,
-		)
+		logger.Debug("cloudflare config", "account_id", cfg.CF.CFAccountID, "zones", len(cfg.CF.Zones))
+		for _, z := range cfg.CF.Zones {
+			logger.Debug("cloudflare zone",
+				"zone_id", z.ZoneID,
+				"record_ids", z.RecordIDs,
+				"token", logger.Redacted(z.Credential),
+			)
+		}
 	}
 	if cfg.GoCI.EnableIONOS {
-		logger.Debug("ionos config",
-			"api_url", cfg.IONOS.IONOSApiUrl,
-			"api_key", logger.Redacted(cfg.IONOS.IONOSApiKey),
-			"zone_id", cfg.IONOS.IONOSZoneID,
-			"record_ids", cfg.IONOS.IONOSEntryIDs,
-		)
+		logger.Debug("ionos config", "api_url", cfg.IONOS.IONOSApiUrl, "zones", len(cfg.IONOS.Zones))
+		for _, z := range cfg.IONOS.Zones {
+			logger.Debug("ionos zone",
+				"zone_id", z.ZoneID,
+				"record_ids", z.RecordIDs,
+				"api_key", logger.Redacted(z.Credential),
+			)
+		}
 	}
+}
+
+func countRecords(zones []utils.ZoneEntry) int {
+	n := 0
+	for _, z := range zones {
+		n += len(z.RecordIDs)
+	}
+	return n
 }

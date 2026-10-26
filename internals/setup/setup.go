@@ -180,35 +180,32 @@ func askGeneral(cfg *utils.Config) error {
 // ---------------------------------------------------------------------------
 
 func askCloudflare(cfg *utils.Config) error {
-	zone, err := pickZone("Cloudflare",
-		func() error {
-			return huh.NewInput().
+	z, err := askZones(zoneSource{
+		name:     "Cloudflare",
+		credName: "API token",
+		askCredential: func(round int) (string, error) {
+			var token string
+			err := huh.NewInput().
 				Title("Cloudflare API token").
-				Description("Needs Zone → DNS → Edit on the zone (template \"Edit zone DNS\").\nDashboard → My Profile → API Tokens → Create Token.").
+				Description("Needs Zone → DNS → Edit on the zone(s) (template \"Edit zone DNS\").\nDashboard → My Profile → API Tokens → Create Token.").
 				EchoMode(huh.EchoModePassword).
-				Value(&cfg.CF.CFToken).
+				Value(&token).
 				Validate(notEmpty).
 				Run()
+			return token, err
 		},
-		func(ctx context.Context) ([]provider.Zone, error) {
-			return cf.ListZones(ctx, strings.TrimSpace(cfg.CF.CFToken))
+		listZones: cf.ListZones,
+		listRecords: func(ctx context.Context, token, zoneID string) ([]provider.Record, error) {
+			return cf.ListARecords(ctx, token, zoneID)
 		},
-	)
-	if err != nil {
-		return err
-	}
-	cfg.CF.CFToken = strings.TrimSpace(cfg.CF.CFToken)
-	cfg.CF.CFZoneID = zone.ID
-	cfg.CF.CFAccountID = zone.AccountID
-
-	ids, err := pickRecords("Cloudflare", zone, func(ctx context.Context) ([]provider.Record, error) {
-		return cf.ListARecords(ctx, cfg.CF.CFToken, zone.ID)
 	})
 	if err != nil {
 		return err
 	}
-	cfg.CF.CFDNSEntryIDs = ids
-	cfg.CF.CFDNSEntries = strings.Join(ids, ",")
+	cfg.CF.CFToken = z.defaultCred
+	cfg.CF.CFAccountID = z.accountID
+	cfg.CF.CFZones = strings.Join(z.zones, ";")
+	cfg.CF.CFZoneTokens = strings.Join(z.overrides, ";")
 	return nil
 }
 
@@ -217,41 +214,44 @@ func askCloudflare(cfg *utils.Config) error {
 // ---------------------------------------------------------------------------
 
 func askIONOS(cfg *utils.Config) error {
-	zone, err := pickZone("IONOS",
-		func() error {
-			return huh.NewForm(huh.NewGroup(
+	z, err := askZones(zoneSource{
+		name:     "IONOS",
+		credName: "API key",
+		askCredential: func(round int) (string, error) {
+			var key string
+			fields := []huh.Field{
 				huh.NewInput().
 					Title("IONOS API key").
 					Description("Format: <public prefix>.<secret>.\nCreate it at https://developer.hosting.ionos.com (\"Manage API keys\").").
 					EchoMode(huh.EchoModePassword).
-					Value(&cfg.IONOS.IONOSApiKey).
+					Value(&key).
 					Validate(notEmpty),
-				huh.NewInput().
+			}
+			if round == 0 {
+				// The API URL is shared by every IONOS zone: ask it once.
+				fields = append(fields, huh.NewInput().
 					Title("IONOS DNS API URL").
 					Description("Leave the default unless you know you need another endpoint.").
 					Value(&cfg.IONOS.IONOSApiUrl).
-					Validate(httpURL),
-			)).Run()
+					Validate(httpURL))
+			}
+			err := huh.NewForm(huh.NewGroup(fields...)).Run()
+			cfg.IONOS.IONOSApiUrl = strings.TrimSpace(cfg.IONOS.IONOSApiUrl)
+			return key, err
 		},
-		func(ctx context.Context) ([]provider.Zone, error) {
-			return ionos.ListZones(ctx, strings.TrimSpace(cfg.IONOS.IONOSApiUrl), strings.TrimSpace(cfg.IONOS.IONOSApiKey))
+		listZones: func(ctx context.Context, key string) ([]provider.Zone, error) {
+			return ionos.ListZones(ctx, cfg.IONOS.IONOSApiUrl, key)
 		},
-	)
-	if err != nil {
-		return err
-	}
-	cfg.IONOS.IONOSApiKey = strings.TrimSpace(cfg.IONOS.IONOSApiKey)
-	cfg.IONOS.IONOSApiUrl = strings.TrimSpace(cfg.IONOS.IONOSApiUrl)
-	cfg.IONOS.IONOSZoneID = zone.ID
-
-	ids, err := pickRecords("IONOS", zone, func(ctx context.Context) ([]provider.Record, error) {
-		return ionos.ListARecords(ctx, cfg.IONOS.IONOSApiUrl, cfg.IONOS.IONOSApiKey, zone.ID)
+		listRecords: func(ctx context.Context, key, zoneID string) ([]provider.Record, error) {
+			return ionos.ListARecords(ctx, cfg.IONOS.IONOSApiUrl, key, zoneID)
+		},
 	})
 	if err != nil {
 		return err
 	}
-	cfg.IONOS.IONOSEntryIDs = ids
-	cfg.IONOS.IONOSEntries = strings.Join(ids, ",")
+	cfg.IONOS.IONOSApiKey = z.defaultCred
+	cfg.IONOS.IONOSZones = strings.Join(z.zones, ";")
+	cfg.IONOS.IONOSZoneApiKeys = strings.Join(z.overrides, ";")
 	return nil
 }
 
@@ -259,20 +259,96 @@ func askIONOS(cfg *utils.Config) error {
 // Shared steps
 // ---------------------------------------------------------------------------
 
-// pickZone asks for credentials, lists the zones they can see and lets the
-// user choose one. If listing fails the user can retry with other credentials
-// or type the Zone ID by hand.
-func pickZone(name string, askCredentials func() error, list func(context.Context) ([]provider.Zone, error)) (provider.Zone, error) {
+// zoneSource describes how the wizard talks to one provider.
+type zoneSource struct {
+	name     string // e.g. "Cloudflare"
+	credName string // e.g. "API token"
+	// askCredential asks for a token/key; round is 0 for the first one.
+	askCredential func(round int) (string, error)
+	listZones     func(ctx context.Context, cred string) ([]provider.Zone, error)
+	listRecords   func(ctx context.Context, cred, zoneID string) ([]provider.Record, error)
+}
+
+// zoneAnswers holds the config values collected by askZones.
+type zoneAnswers struct {
+	defaultCred string   // first credential, the provider default
+	accountID   string   // account of the first zone, if known
+	zones       []string // "zone:rec1,rec2" entries
+	overrides   []string // "zone:credential" entries for later credentials
+}
+
+// askZones asks for a credential, lets the user pick zones and records, and
+// repeats while the user wants to add zones with another credential.
+func askZones(src zoneSource) (zoneAnswers, error) {
+	var ans zoneAnswers
+	seen := make(map[string]bool)
+	for round := 0; ; round++ {
+		var cred string
+		zones, err := pickZones(src.name,
+			func() error {
+				c, err := src.askCredential(round)
+				cred = strings.TrimSpace(c)
+				return err
+			},
+			func(ctx context.Context) ([]provider.Zone, error) { return src.listZones(ctx, cred) },
+		)
+		if err != nil {
+			return ans, err
+		}
+		if round == 0 {
+			ans.defaultCred = cred
+			ans.accountID = zones[0].AccountID
+		}
+
+		for _, zone := range zones {
+			if seen[zone.ID] {
+				fmt.Printf("%s is already configured – skipping\n", zone.Name)
+				continue
+			}
+			seen[zone.ID] = true
+			ids, err := pickRecords(src.name, zone, func(ctx context.Context) ([]provider.Record, error) {
+				return src.listRecords(ctx, cred, zone.ID)
+			})
+			if err != nil {
+				return ans, err
+			}
+			ans.zones = append(ans.zones, zone.ID+":"+strings.Join(ids, ","))
+			if round > 0 {
+				ans.overrides = append(ans.overrides, zone.ID+":"+cred)
+			}
+		}
+
+		more := false
+		if err := huh.NewConfirm().
+			Title(fmt.Sprintf("Add %s zones that need another %s?", src.name, src.credName)).
+			Description(fmt.Sprintf("For example zones in another %s account.", src.name)).
+			Affirmative("Yes").
+			Negative("No, continue").
+			Value(&more).
+			Run(); err != nil {
+			return ans, err
+		}
+		logger.Debug("[setup] zones collected", "provider", src.name, "round", round, "zones", len(ans.zones), "more", more)
+		if !more {
+			return ans, nil
+		}
+	}
+}
+
+// pickZones asks for credentials, lists the zones they can see and lets the
+// user choose one or more. If listing fails the user can retry with other
+// credentials or type the Zone IDs by hand.
+func pickZones(name string, askCredentials func() error, list func(context.Context) ([]provider.Zone, error)) ([]provider.Zone, error) {
 	for {
 		if err := askCredentials(); err != nil {
-			return provider.Zone{}, err
+			return nil, err
 		}
 
 		fmt.Printf("Fetching %s zones…\n", name)
 		logger.Debug("[setup] listing zones", "provider", name)
 		zones, err := withTimeout(list)
 		if err == nil && len(zones) > 0 {
-			return selectZone(name, zones)
+			return selectZones(name, zones)
 		}
 
 		problem := "no zones are visible with these credentials"
@@ -281,51 +357,69 @@ func pickZone(name string, askCredentials func() error, list func(context.Contex
 		}
 		action, aerr := askFailure(fmt.Sprintf("Could not list %s zones", name), problem, true)
 		if aerr != nil {
-			return provider.Zone{}, aerr
+			return nil, aerr
 		}
 		logger.Debug("[setup] zone listing failed", "provider", name, "problem", problem, "action", action)
 		switch action {
 		case "retry":
 			continue
 		case "manual":
-			var id string
+			var raw string
 			if err := huh.NewInput().
-				Title(name + " Zone ID").
-				Value(&id).
+				Title(name + " Zone ID(s)").
+				Description("Separate several IDs with commas.").
+				Value(&raw).
 				Validate(notEmpty).
 				Run(); err != nil {
-				return provider.Zone{}, err
+				return nil, err
 			}
-			id = strings.TrimSpace(id)
-			logger.Debug("[setup] zone entered manually", "provider", name, "zone_id", id)
-			return provider.Zone{ID: id, Name: id}, nil
+			var manual []provider.Zone
+			for _, id := range strings.Split(raw, ",") {
+				if id = strings.TrimSpace(id); id != "" {
+					manual = append(manual, provider.Zone{ID: id, Name: id})
+				}
+			}
+			logger.Debug("[setup] zones entered manually", "provider", name, "zones", manual)
+			return manual, nil
 		default:
-			return provider.Zone{}, huh.ErrUserAborted
+			return nil, huh.ErrUserAborted
 		}
 	}
 }
 
-func selectZone(name string, zones []provider.Zone) (provider.Zone, error) {
+func selectZones(name string, zones []provider.Zone) ([]provider.Zone, error) {
 	if len(zones) == 1 {
 		fmt.Printf("Using the only %s zone: %s\n", name, zones[0].Name)
 		logger.Debug("[setup] zone selected automatically", "provider", name, "zone", zones[0])
-		return zones[0], nil
+		return zones, nil
 	}
 
 	options := make([]huh.Option[int], len(zones))
 	for i, z := range zones {
 		options[i] = huh.NewOption(fmt.Sprintf("%s  (%s)", z.Name, z.ID), i)
 	}
-	var idx int
-	if err := huh.NewSelect[int]().
-		Title(name + " zone").
+	var picked []int
+	if err := huh.NewMultiSelect[int]().
+		Title(name + " zones to keep updated").
+		Description("Space to toggle, / to filter, Enter to confirm.").
 		Options(options...).
-		Value(&idx).
+		Filterable(true).
+		Value(&picked).
+		Validate(func(v []int) error {
+			if len(v) == 0 {
+				return errors.New("select at least one zone")
+			}
+			return nil
+		}).
 		Run(); err != nil {
-		return provider.Zone{}, err
+		return nil, err
 	}
-	logger.Debug("[setup] zone selected", "provider", name, "zone", zones[idx])
-	return zones[idx], nil
+	selected := make([]provider.Zone, len(picked))
+	for i, idx := range picked {
+		selected[i] = zones[idx]
+	}
+	logger.Debug("[setup] zones selected", "provider", name, "zones", selected)
+	return selected, nil
 }
 
 // pickRecords lists the A records of zone and lets the user choose which
@@ -384,7 +478,7 @@ func selectRecords(name string, records []provider.Record) ([]string, error) {
 func askFailure(title, problem string, allowManual bool) (string, error) {
 	options := []huh.Option[string]{huh.NewOption("Try again", "retry")}
 	if allowManual {
-		options = append(options, huh.NewOption("Enter the Zone ID manually", "manual"))
+		options = append(options, huh.NewOption("Enter the Zone ID(s) manually", "manual"))
 	}
 	options = append(options, huh.NewOption("Abort setup", "abort"))
 

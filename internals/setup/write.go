@@ -34,16 +34,20 @@ func render(cfg *utils.Config) *ini.File {
 
 	if g.EnableCloudflare {
 		set("CF", "CF_TOKEN", cfg.CF.CFToken, "API token with Zone → DNS → Edit permission")
-		set("CF", "CF_ZONE_ID", cfg.CF.CFZoneID, "Zone ID of the domain")
 		set("CF", "CF_ACCOUNT_ID", cfg.CF.CFAccountID, "Account ID (optional, reserved for future use)")
-		set("CF", "CF_DNS_ENTRIES_ID", cfg.CF.CFDNSEntries, "Comma-separated list of A record IDs to update")
+		set("CF", "CF_ZONES", cfg.CF.CFZones, "Zones and A record IDs to update: <zone id>:<record id>,<record id>;<zone id>:...")
+		if cfg.CF.CFZoneTokens != "" {
+			set("CF", "CF_ZONE_TOKENS", cfg.CF.CFZoneTokens, "Per-zone tokens that replace CF_TOKEN: <zone id>:<token>;...")
+		}
 	}
 
 	if g.EnableIONOS {
 		set("IONOS", "IONOS_API_URL", cfg.IONOS.IONOSApiUrl, "IONOS DNS API base URL")
 		set("IONOS", "IONOS_API_KEY", cfg.IONOS.IONOSApiKey, "API key in the form <public prefix>.<secret>")
-		set("IONOS", "IONOS_ZONE_ID", cfg.IONOS.IONOSZoneID, "Zone ID of the domain")
-		set("IONOS", "IONOS_DNS_ENTRIES_ID", cfg.IONOS.IONOSEntries, "Comma-separated list of A record IDs to update")
+		set("IONOS", "IONOS_ZONES", cfg.IONOS.IONOSZones, "Zones and A record IDs to update: <zone id>:<record id>,<record id>;<zone id>:...")
+		if cfg.IONOS.IONOSZoneApiKeys != "" {
+			set("IONOS", "IONOS_ZONE_API_KEYS", cfg.IONOS.IONOSZoneApiKeys, "Per-zone API keys that replace IONOS_API_KEY: <zone id>:<key>;...")
+		}
 	}
 
 	return f
