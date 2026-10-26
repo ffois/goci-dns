@@ -53,19 +53,19 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 
 		existing, ok := currentRecords[recordID]
 		if !ok {
-			logger.Info(fmt.Sprintf("[%s] record not found in zone – skipping", recordID))
+			logger.Warn(fmt.Sprintf("[CF:%s] record not found in zone – skipping", recordID))
 			continue
 		}
 		if existing.Type != dns.RecordResponseTypeA {
-			logger.Warn(fmt.Sprintf("[%s] record type is %s, not A – skipping", recordID, existing.Type))
+			logger.Warn(fmt.Sprintf("[CF:%s] record type is %s, not A – skipping", recordID, existing.Type))
 			continue
 		}
 		recordName := existing.Name
 
-		logger.Info(fmt.Sprintf("[%s] current name=%q content=%s → new content=%s", recordID, recordName, existing.Content, newIP))
+		logger.Info(fmt.Sprintf("[CF:%s] current name=%q content=%s → new content=%s", recordID, recordName, existing.Content, newIP))
 
 		if existing.Content == newIP {
-			logger.Info(fmt.Sprintf("[%s] content already matches new IP %s – skipping update", recordID, newIP))
+			logger.Info(fmt.Sprintf("[CF:%s] content already matches new IP %s – skipping update", recordID, newIP))
 			continue
 		}
 
@@ -84,7 +84,7 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 			return fmt.Errorf("update record %q: %w", recordID, err)
 		}
 
-		logger.Info(fmt.Sprintf("[%s] success: updated to %s", recordID, newIP))
+		logger.Info(fmt.Sprintf("[CF:%s] success: updated to %s", recordID, newIP))
 	}
 
 	return nil

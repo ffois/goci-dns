@@ -105,10 +105,10 @@ func check(cfg *utils.Config, statePath string) error {
 	if ipChanged {
 		logger.Info(fmt.Sprintf("IP changed: %q → %q", state.IP, currentIP))
 	} else {
-		logger.Info(fmt.Sprintf("IGNORE_OLD_IP=true – forcing update regardless of IP match."))
+		logger.Info("IGNORE_OLD_IP=true – forcing update regardless of IP match.")
 	}
 
-	// 4. Determine the target IP to push to Cloudflare.
+	// 4. Determine the target IP to push to the providers.
 	targetIP := currentIP
 	if cfg.GoCI.OverrideNewIP && cfg.GoCI.NewIP != "" {
 		targetIP = cfg.GoCI.NewIP
@@ -116,6 +116,7 @@ func check(cfg *utils.Config, statePath string) error {
 			targetIP, currentIP))
 	}
 
+	// 5. Push the update to every enabled provider.
 	if cfg.GoCI.EnableCloudflare {
 		if err := cf.UpdateDNS(cfg, targetIP); err != nil {
 			return fmt.Errorf("cloudflare update: %w", err)
@@ -135,8 +136,10 @@ func check(cfg *utils.Config, statePath string) error {
 	}
 	logger.Info(fmt.Sprintf("State saved: ip=%s updatedAt=%s", state.IP, state.UpdatedAt.Format(time.RFC3339)))
 
-	interval := time.Duration(cfg.GoCI.TTLMinutesCheckDNSEntries) * time.Minute
-	logger.Info(fmt.Sprintf("Current run done! New run scheduled in: %s", interval))
+	if cfg.GoCI.TTLMinutesCheckDNSEntries > 0 {
+		interval := time.Duration(cfg.GoCI.TTLMinutesCheckDNSEntries) * time.Minute
+		logger.Info(fmt.Sprintf("Current run done! New run scheduled in: %s", interval))
+	}
 
 	return nil
 }
@@ -181,7 +184,7 @@ func main() {
 
 		runCheck := func() {
 			if err := check(cfg, statePath); err != nil {
-				logger.Info(fmt.Sprintf("ERROR: %v", err))
+				logger.Error(fmt.Sprintf("check failed: %v", err))
 			}
 		}
 
@@ -194,9 +197,9 @@ func main() {
 		}
 	} else {
 		// OneShot mode (if enabled via cron job and TTL_MINUTES_CHECK_DNS_ENTRIES=0)
-		logger.Info(fmt.Sprintf("One-shot mode (TTL_MINUTES_CHECK_DNS_ENTRIES=0)."))
+		logger.Info("One-shot mode (TTL_MINUTES_CHECK_DNS_ENTRIES=0).")
 		if err := check(cfg, statePath); err != nil {
-			logger.Fatal(fmt.Sprintf("ERROR: %v", err))
+			logger.Fatal(fmt.Sprintf("check failed: %v", err))
 		}
 	}
 }

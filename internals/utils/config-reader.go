@@ -108,9 +108,6 @@ func ValidateConfig(config *Config) (bool, error) {
 		if isDefault(config.CF.CFZoneID) {
 			return false, fmt.Errorf("CF.CF_ZONE_ID is empty or default")
 		}
-		if isDefault(config.CF.CFAccountID) {
-			return false, fmt.Errorf("CF.CF_ACCOUNT_ID is empty or default")
-		}
 		if isDefault(config.CF.CFDNSEntries) {
 			return false, fmt.Errorf("CF.CF_DNS_ENTRIES_ID is empty or default")
 		}
@@ -157,7 +154,7 @@ func ValidateConfig(config *Config) (bool, error) {
 	return true, nil
 }
 
-// parseDNSEntryIDs converts a semicolon-delimited record-id string into []string.
+// parseDNSEntryIDs converts a comma-separated record-id string into []string.
 func parseDNSEntryIDs(raw string) []string {
 	var entries []string
 	for _, part := range strings.Split(raw, ",") {

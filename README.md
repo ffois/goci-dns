@@ -42,7 +42,7 @@ At least one provider must be enabled.
 
 - `CF_TOKEN` = Cloudflare API token
 - `CF_ZONE_ID` = Cloudflare zone ID
-- `CF_ACCOUNT_ID` = Cloudflare account ID (reserved for future use)
+- `CF_ACCOUNT_ID` = Cloudflare account ID (optional, reserved for future use)
 - `CF_DNS_ENTRIES_ID` = comma-separated record IDs (for example `id1,id2`)
 
 ### `[IONOS]` (IONOS)
