@@ -58,10 +58,6 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	if !config.GoCI.EnableIONOS && !config.GoCI.EnableCloudflare {
-		logger.Fatal("At least one provider must be enabled: GoCI.EnableIONOS or GoCI.EnableCloudflare")
-	}
-
 	if config.GoCI.EnableIONOS {
 		config.IONOS.IONOSEntryIDs = parseDNSEntryIDs(config.IONOS.IONOSEntries)
 	}
@@ -70,7 +66,7 @@ func LoadConfig(path string) (*Config, error) {
 	}
 
 	if valid, err := ValidateConfig(config); !valid {
-		logger.Warn("Config validation failed:", err)
+		logger.Warn("Config validation failed", "error", err.Error())
 		return nil, err
 	}
 
@@ -91,6 +87,9 @@ func ValidateConfig(config *Config) (bool, error) {
 	}
 
 	// [GoCI]
+	if !config.GoCI.EnableIONOS && !config.GoCI.EnableCloudflare {
+		return false, fmt.Errorf("at least one provider must be enabled: GoCI.ENABLE_CLOUDFLARE or GoCI.ENABLE_IONOS")
+	}
 	if config.GoCI.TTLMinutesCheckDNSEntries < 0 {
 		return false, fmt.Errorf("GoCI.TTL_MINUTES_CHECK_DNS_ENTRIES must be >= 0")
 	}
