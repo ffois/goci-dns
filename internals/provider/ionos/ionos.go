@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"goci-dns/internals/logger"
 	"goci-dns/internals/utils"
@@ -12,13 +13,22 @@ import (
 	ionosapi "github.com/ffois/go-ionos"
 )
 
+const (
+	// requestTimeout bounds a single IONOS API request.
+	requestTimeout = 15 * time.Second
+	// runTimeout bounds a whole UpdateDNS call (zone fetch + all updates).
+	runTimeout = 2 * time.Minute
+)
+
 // UpdateDNS iterates over every DNS record ID in cfg and updates the record content.
 func UpdateDNS(cfg *utils.Config, newIP string) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	defer cancel()
 
 	client := ionosapi.NewClient(
 		ionosapi.WithAPIKey(cfg.IONOS.IONOSApiKey),
 		ionosapi.WithBaseURL(cfg.IONOS.IONOSApiUrl),
+		ionosapi.WithTimeout(requestTimeout),
 	)
 
 	zone, err := client.Zones.Get(ctx, cfg.IONOS.IONOSZoneID, nil)
@@ -48,6 +58,15 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 		}
 		if existing == nil {
 			logger.Warn(fmt.Sprintf("[IONOS:%s] record not found in zone - skipping", recordID))
+			continue
+		}
+
+		if existing.Type == nil || *existing.Type != ionosapi.A {
+			recordType := "unknown"
+			if existing.Type != nil {
+				recordType = string(*existing.Type)
+			}
+			logger.Warn(fmt.Sprintf("[IONOS:%s] record type is %s, not A - skipping", recordID, recordType))
 			continue
 		}
 

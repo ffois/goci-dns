@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"goci-dns/internals/logger"
 	"goci-dns/internals/utils"
@@ -14,11 +15,22 @@ import (
 	"github.com/cloudflare/cloudflare-go/v7/option"
 )
 
+const (
+	// requestTimeout bounds a single Cloudflare API request.
+	requestTimeout = 15 * time.Second
+	// runTimeout bounds a whole UpdateDNS call (listing + all updates).
+	runTimeout = 2 * time.Minute
+)
+
 // UpdateDNS iterates over every DNS record ID in cfg and PUTs the new IP.
 // It first lists all zone records (across every page) so it can preserve the record name.
 func UpdateDNS(cfg *utils.Config, newIP string) error {
-	client := cloudflare.NewClient(option.WithAPIToken(cfg.CF.CFToken))
-	ctx := context.Background()
+	client := cloudflare.NewClient(
+		option.WithAPIToken(cfg.CF.CFToken),
+		option.WithRequestTimeout(requestTimeout),
+	)
+	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
+	defer cancel()
 
 	// Walk every page of the zone so records beyond the first page are found too.
 	currentRecords := make(map[string]dns.RecordResponse)
@@ -44,6 +56,10 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 			logger.Info(fmt.Sprintf("[%s] record not found in zone – skipping", recordID))
 			continue
 		}
+		if existing.Type != dns.RecordResponseTypeA {
+			logger.Warn(fmt.Sprintf("[%s] record type is %s, not A – skipping", recordID, existing.Type))
+			continue
+		}
 		recordName := existing.Name
 
 		logger.Info(fmt.Sprintf("[%s] current name=%q content=%s → new content=%s", recordID, recordName, existing.Content, newIP))
@@ -59,7 +75,7 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 			Body: dns.ARecordParam{
 				Name:    cloudflare.F(recordName),
 				Type:    cloudflare.F(dns.ARecordTypeA),
-				TTL:     cloudflare.F(dns.TTL1), // automatic TTL
+				TTL:     cloudflare.F(existing.TTL),
 				Content: cloudflare.F(newIP),
 				Proxied: cloudflare.F(existing.Proxied),
 			},
