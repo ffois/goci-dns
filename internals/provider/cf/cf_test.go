@@ -1,14 +1,17 @@
 package cf
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	"goci-dns/internals/provider"
 	"goci-dns/internals/utils"
 )
 
@@ -25,6 +28,20 @@ type fakeCF struct {
 func (f *fakeCF) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/zones":
+		// One zone on page 1, then an empty page to stop auto-paging.
+		result := []map[string]any{}
+		if p := r.URL.Query().Get("page"); p == "" || p == "1" {
+			result = append(result, map[string]any{
+				"id": "zone", "name": "example.org",
+				"account": map[string]any{"id": "acc", "name": "Account"},
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"success": true, "errors": []any{}, "messages": []any{},
+			"result":      result,
+			"result_info": map[string]any{"page": 1, "per_page": 50},
+		})
 	case r.Method == http.MethodGet && r.URL.Path == "/zones/zone/dns_records":
 		page := 1
 		fmt.Sscanf(r.URL.Query().Get("page"), "%d", &page)
@@ -104,5 +121,38 @@ func TestUpdateDNS(t *testing.T) {
 	// Record only reachable through pagination.
 	if u, ok := fake.updates["page2"]; !ok || u["content"] != newIP {
 		t.Errorf("page2 update = %v (found=%v)", u, ok)
+	}
+}
+
+func TestListZonesAndARecords(t *testing.T) {
+	fake := &fakeCF{
+		pages: [][]map[string]any{
+			{record("a1", "A", "198.51.100.1", 1, false)},
+			{record("aaaa", "AAAA", "2001:db8::1", 1, false), record("a2", "A", "198.51.100.2", 1, false)},
+		},
+		updates: map[string]map[string]any{},
+	}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+	t.Setenv("CLOUDFLARE_BASE_URL", srv.URL+"/")
+
+	zones, err := ListZones(context.Background(), "token")
+	if err != nil {
+		t.Fatalf("ListZones: %v", err)
+	}
+	if want := []provider.Zone{{ID: "zone", Name: "example.org", AccountID: "acc"}}; !reflect.DeepEqual(zones, want) {
+		t.Errorf("zones = %+v, want %+v", zones, want)
+	}
+
+	records, err := ListARecords(context.Background(), "token", "zone")
+	if err != nil {
+		t.Fatalf("ListARecords: %v", err)
+	}
+	want := []provider.Record{
+		{ID: "a1", Name: "a1.example.org", Content: "198.51.100.1"},
+		{ID: "a2", Name: "a2.example.org", Content: "198.51.100.2"},
+	}
+	if !reflect.DeepEqual(records, want) {
+		t.Errorf("records = %+v, want %+v", records, want)
 	}
 }

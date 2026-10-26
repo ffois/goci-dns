@@ -1,4 +1,4 @@
-// Package ionos updates IONOS DNS records.
+// Package ionos lists and updates IONOS DNS records.
 package ionos
 
 import (
@@ -25,11 +25,7 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	defer cancel()
 
-	client := ionosapi.NewClient(
-		ionosapi.WithAPIKey(cfg.IONOS.IONOSApiKey),
-		ionosapi.WithBaseURL(cfg.IONOS.IONOSApiUrl),
-		ionosapi.WithTimeout(requestTimeout),
-	)
+	client := newClient(cfg.IONOS.IONOSApiUrl, cfg.IONOS.IONOSApiKey)
 
 	zone, err := client.Zones.Get(ctx, cfg.IONOS.IONOSZoneID, nil)
 	if err != nil {

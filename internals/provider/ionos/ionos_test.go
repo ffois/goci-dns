@@ -1,13 +1,16 @@
 package ionos
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	"goci-dns/internals/provider"
 	"goci-dns/internals/utils"
 )
 
@@ -24,6 +27,8 @@ type fakeIONOS struct {
 func (f *fakeIONOS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/v1/zones":
+		json.NewEncoder(w).Encode([]map[string]any{{"id": "zone", "name": "example.org", "type": "NATIVE"}})
 	case r.Method == http.MethodGet && r.URL.Path == "/v1/zones/zone":
 		json.NewEncoder(w).Encode(map[string]any{
 			"id": "zone", "name": "example.org", "type": "NATIVE", "records": f.records,
@@ -81,5 +86,33 @@ func TestUpdateDNS(t *testing.T) {
 	}
 	if u["content"] != newIP || u["ttl"] != float64(600) {
 		t.Errorf("update body = %v", u)
+	}
+}
+
+func TestListZonesAndARecords(t *testing.T) {
+	fake := &fakeIONOS{
+		records: []map[string]any{
+			record("a1", "A", "198.51.100.1", 3600),
+			record("aaaa", "AAAA", "2001:db8::1", 3600),
+		},
+		updates: map[string]map[string]any{},
+	}
+	srv := httptest.NewServer(fake)
+	defer srv.Close()
+
+	zones, err := ListZones(context.Background(), srv.URL, "key")
+	if err != nil {
+		t.Fatalf("ListZones: %v", err)
+	}
+	if want := []provider.Zone{{ID: "zone", Name: "example.org"}}; !reflect.DeepEqual(zones, want) {
+		t.Errorf("zones = %+v, want %+v", zones, want)
+	}
+
+	records, err := ListARecords(context.Background(), srv.URL, "key", "zone")
+	if err != nil {
+		t.Fatalf("ListARecords: %v", err)
+	}
+	if want := []provider.Record{{ID: "a1", Name: "a1.example.org", Content: "198.51.100.1"}}; !reflect.DeepEqual(records, want) {
+		t.Errorf("records = %+v, want %+v", records, want)
 	}
 }

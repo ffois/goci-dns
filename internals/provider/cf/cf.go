@@ -1,4 +1,4 @@
-// Package cf updates Cloudflare DNS records.
+// Package cf lists and updates Cloudflare DNS records.
 package cf
 
 import (
@@ -12,7 +12,6 @@ import (
 
 	cloudflare "github.com/cloudflare/cloudflare-go/v7"
 	"github.com/cloudflare/cloudflare-go/v7/dns"
-	"github.com/cloudflare/cloudflare-go/v7/option"
 )
 
 const (
@@ -25,10 +24,7 @@ const (
 // UpdateDNS iterates over every DNS record ID in cfg and PUTs the new IP.
 // It first lists all zone records (across every page) so it can preserve the record name.
 func UpdateDNS(cfg *utils.Config, newIP string) error {
-	client := cloudflare.NewClient(
-		option.WithAPIToken(cfg.CF.CFToken),
-		option.WithRequestTimeout(requestTimeout),
-	)
+	client := newClient(cfg.CF.CFToken)
 	ctx, cancel := context.WithTimeout(context.Background(), runTimeout)
 	defer cancel()
 
