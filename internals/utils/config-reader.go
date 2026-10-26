@@ -12,6 +12,9 @@ import (
 // DefaultIPDiscoveryURL is used when USE_IP_DISCOVERY=true and IP_DISCOVERY_URL is empty.
 const DefaultIPDiscoveryURL = "https://api.ipify.org"
 
+// DefaultIONOSApiURL is the base URL of the IONOS DNS API.
+const DefaultIONOSApiURL = "https://api.hosting.ionos.com/dns"
+
 // Config represents the structure of config.ini.
 type Config struct {
 	GoCI  GoCIConfig  `ini:"GoCI"`

@@ -15,6 +15,7 @@ import (
 	"goci-dns/internals/logger"
 	"goci-dns/internals/provider/cf"
 	"goci-dns/internals/provider/ionos"
+	"goci-dns/internals/setup"
 	"goci-dns/internals/utils"
 )
 
@@ -204,6 +205,14 @@ func check(cfg *utils.Config, statePath string) error {
 }
 
 func main() {
+	// Usage: goci-dns setup [config.ini]
+	// Runs the interactive wizard; the JSON logger is not started so it
+	// does not interfere with the terminal UI.
+	if len(os.Args) > 1 && os.Args[1] == "setup" {
+		runSetup()
+		return
+	}
+
 	// On error the logger falls back to stdout and reports it itself.
 	_ = logger.InitLogger("goci-dns")
 	defer logger.CloseLogger()
@@ -264,5 +273,16 @@ func main() {
 		if err := check(cfg, statePath); err != nil {
 			logger.Fatal(fmt.Sprintf("check failed: %v", err))
 		}
+	}
+}
+
+func runSetup() {
+	configPath := "config.ini"
+	if len(os.Args) > 2 {
+		configPath = os.Args[2]
+	}
+	if err := setup.Run(configPath); err != nil {
+		fmt.Fprintln(os.Stderr, "setup:", err)
+		os.Exit(1)
 	}
 }
