@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"goci-dns/internals/logger"
 	"goci-dns/internals/provider"
 	"goci-dns/internals/provider/cf"
 	"goci-dns/internals/provider/ionos"
@@ -30,6 +31,8 @@ var ErrAborted = errors.New("setup aborted")
 // Run walks the user through creating a config file and writes it.
 // defaultPath is proposed as the output path.
 func Run(defaultPath string) error {
+	logger.Debug("[setup] started", "default_path", defaultPath)
+
 	cfg := &utils.Config{}
 	cfg.GoCI.IPDiscoveryURL = utils.DefaultIPDiscoveryURL
 	cfg.IONOS.IONOSApiUrl = utils.DefaultIONOSApiURL
@@ -46,6 +49,7 @@ func Run(defaultPath string) error {
 	}
 
 	if valid, err := utils.ValidateConfig(cfg); !valid {
+		logger.Debug("[setup] generated config is invalid", "error", err.Error())
 		return fmt.Errorf("generated config is invalid: %w", err)
 	}
 
@@ -54,8 +58,10 @@ func Run(defaultPath string) error {
 		return wrapAbort(err)
 	}
 	if err := writeConfig(cfg, path); err != nil {
+		logger.Debug("[setup] write failed", "path", path, "error", err.Error())
 		return err
 	}
+	logger.Debug("[setup] config written", "path", path)
 
 	fmt.Printf("\nConfig written to %s\n\nRun goci-dns with:\n  goci-dns %s\n", path, path)
 	return nil
@@ -63,8 +69,10 @@ func Run(defaultPath string) error {
 
 func wrapAbort(err error) error {
 	if errors.Is(err, huh.ErrUserAborted) {
+		logger.Debug("[setup] aborted by user")
 		return ErrAborted
 	}
+	logger.Debug("[setup] failed", "error", err.Error())
 	return err
 }
 
@@ -156,6 +164,14 @@ func askGeneral(cfg *utils.Config) error {
 			cfg.GoCI.EnableIONOS = true
 		}
 	}
+	logger.Debug("[setup] general answers",
+		"ip_source", ipSource,
+		"domain_to_resolve", cfg.GoCI.DomainToResolve,
+		"ip_discovery_url", cfg.GoCI.IPDiscoveryURL,
+		"mode", mode,
+		"ttl_minutes", cfg.GoCI.TTLMinutesCheckDNSEntries,
+		"providers", providers,
+	)
 	return nil
 }
 
@@ -253,6 +269,7 @@ func pickZone(name string, askCredentials func() error, list func(context.Contex
 		}
 
 		fmt.Printf("Fetching %s zones…\n", name)
+		logger.Debug("[setup] listing zones", "provider", name)
 		zones, err := withTimeout(list)
 		if err == nil && len(zones) > 0 {
 			return selectZone(name, zones)
@@ -266,6 +283,7 @@ func pickZone(name string, askCredentials func() error, list func(context.Contex
 		if aerr != nil {
 			return provider.Zone{}, aerr
 		}
+		logger.Debug("[setup] zone listing failed", "provider", name, "problem", problem, "action", action)
 		switch action {
 		case "retry":
 			continue
@@ -279,6 +297,7 @@ func pickZone(name string, askCredentials func() error, list func(context.Contex
 				return provider.Zone{}, err
 			}
 			id = strings.TrimSpace(id)
+			logger.Debug("[setup] zone entered manually", "provider", name, "zone_id", id)
 			return provider.Zone{ID: id, Name: id}, nil
 		default:
 			return provider.Zone{}, huh.ErrUserAborted
@@ -289,6 +308,7 @@ func pickZone(name string, askCredentials func() error, list func(context.Contex
 func selectZone(name string, zones []provider.Zone) (provider.Zone, error) {
 	if len(zones) == 1 {
 		fmt.Printf("Using the only %s zone: %s\n", name, zones[0].Name)
+		logger.Debug("[setup] zone selected automatically", "provider", name, "zone", zones[0])
 		return zones[0], nil
 	}
 
@@ -304,6 +324,7 @@ func selectZone(name string, zones []provider.Zone) (provider.Zone, error) {
 		Run(); err != nil {
 		return provider.Zone{}, err
 	}
+	logger.Debug("[setup] zone selected", "provider", name, "zone", zones[idx])
 	return zones[idx], nil
 }
 
@@ -312,6 +333,7 @@ func selectZone(name string, zones []provider.Zone) (provider.Zone, error) {
 func pickRecords(name string, zone provider.Zone, list func(context.Context) ([]provider.Record, error)) ([]string, error) {
 	for {
 		fmt.Printf("Fetching A records of %s…\n", zone.Name)
+		logger.Debug("[setup] listing A records", "provider", name, "zone_id", zone.ID)
 		records, err := withTimeout(list)
 		if err == nil && len(records) > 0 {
 			return selectRecords(name, records)
@@ -325,6 +347,7 @@ func pickRecords(name string, zone provider.Zone, list func(context.Context) ([]
 		if aerr != nil {
 			return nil, aerr
 		}
+		logger.Debug("[setup] record listing failed", "provider", name, "zone_id", zone.ID, "problem", problem, "action", action)
 		if action != "retry" {
 			return nil, huh.ErrUserAborted
 		}
@@ -350,6 +373,9 @@ func selectRecords(name string, records []provider.Record) ([]string, error) {
 			return nil
 		}).
 		Run()
+	if err == nil {
+		logger.Debug("[setup] records selected", "provider", name, "record_ids", ids)
+	}
 	return ids, err
 }
 
@@ -403,6 +429,7 @@ func askOutputPath(defaultPath string) (string, error) {
 			Run(); err != nil {
 			return "", err
 		}
+		logger.Debug("[setup] output file exists", "path", path, "overwrite", overwrite)
 		if !overwrite {
 			return "", huh.ErrUserAborted
 		}

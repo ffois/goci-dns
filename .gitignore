@@ -33,3 +33,5 @@ go.work.sum
 
 # Config file
 config.ini
+# Local builds
+build/

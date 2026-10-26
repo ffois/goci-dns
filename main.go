@@ -75,6 +75,7 @@ func resolveIP(domain string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("lookup %q: %w", domain, err)
 	}
+	logger.Debug("DNS lookup result", "domain", domain, "resolver", "8.8.8.8:53", "addresses", addrs)
 
 	for _, a := range addrs {
 		if ip := net.ParseIP(a); ip != nil && ip.To4() != nil {
@@ -99,11 +100,13 @@ func fetchPublicIP(discoveryURL string) (string, error) {
 		},
 	}
 
+	start := time.Now()
 	resp, err := client.Get(discoveryURL)
 	if err != nil {
 		return "", fmt.Errorf("get %q: %w", discoveryURL, err)
 	}
 	defer resp.Body.Close()
+	logger.Debug("IP discovery response", "url", discoveryURL, "status", resp.Status, "duration_ms", time.Since(start).Milliseconds())
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("get %q: unexpected status %s", discoveryURL, resp.Status)
@@ -113,6 +116,7 @@ func fetchPublicIP(discoveryURL string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("read %q: %w", discoveryURL, err)
 	}
+	logger.Debug("IP discovery body", "body", strings.TrimSpace(string(body)))
 
 	ip := net.ParseIP(strings.TrimSpace(string(body)))
 	if ip == nil || ip.To4() == nil {
@@ -154,6 +158,7 @@ func check(cfg *utils.Config, statePath string) error {
 	if err != nil {
 		return fmt.Errorf("load state: %w", err)
 	}
+	logger.Debug("state loaded", "path", statePath, "ip", state.IP, "updated_at", state.UpdatedAt)
 
 	// 3. Decide whether an update is required.
 	ipChanged := state.IP != currentIP
@@ -232,6 +237,7 @@ func main() {
 	if err != nil {
 		logger.Fatal(fmt.Sprintf("Config error: %v", err))
 	}
+	logConfig(cfg, configPath, statePath)
 
 	if cfg.GoCI.EnableCloudflare {
 		logger.Info("Cloudflare DNS entries enabled")
@@ -281,8 +287,51 @@ func runSetup() {
 	if len(os.Args) > 2 {
 		configPath = os.Args[2]
 	}
+	// Log to file only: stdout belongs to the terminal UI.
+	if logPath, err := logger.InitFileLogger("goci-dns"); err == nil && logger.DebugEnabled() {
+		fmt.Fprintf(os.Stderr, "Debug log: %s\n", logPath)
+	}
+	defer logger.CloseLogger()
+
 	if err := setup.Run(configPath); err != nil {
 		fmt.Fprintln(os.Stderr, "setup:", err)
 		os.Exit(1)
+	}
+}
+
+// logConfig logs the effective configuration at DEBUG level, with
+// credentials redacted.
+func logConfig(cfg *utils.Config, configPath, statePath string) {
+	if !logger.DebugEnabled() {
+		return
+	}
+	logger.Debug("config loaded",
+		"config_path", configPath,
+		"state_path", statePath,
+		"ttl_minutes", cfg.GoCI.TTLMinutesCheckDNSEntries,
+		"ignore_old_ip", cfg.GoCI.IgnoreOldIP,
+		"domain_to_resolve", cfg.GoCI.DomainToResolve,
+		"use_ip_discovery", cfg.GoCI.UseIPDiscovery,
+		"ip_discovery_url", cfg.GoCI.IPDiscoveryURL,
+		"override_new_ip", cfg.GoCI.OverrideNewIP,
+		"new_ip", cfg.GoCI.NewIP,
+		"enable_cloudflare", cfg.GoCI.EnableCloudflare,
+		"enable_ionos", cfg.GoCI.EnableIONOS,
+	)
+	if cfg.GoCI.EnableCloudflare {
+		logger.Debug("cloudflare config",
+			"token", logger.Redacted(cfg.CF.CFToken),
+			"zone_id", cfg.CF.CFZoneID,
+			"account_id", cfg.CF.CFAccountID,
+			"record_ids", cfg.CF.CFDNSEntryIDs,
+		)
+	}
+	if cfg.GoCI.EnableIONOS {
+		logger.Debug("ionos config",
+			"api_url", cfg.IONOS.IONOSApiUrl,
+			"api_key", logger.Redacted(cfg.IONOS.IONOSApiKey),
+			"zone_id", cfg.IONOS.IONOSZoneID,
+			"record_ids", cfg.IONOS.IONOSEntryIDs,
+		)
 	}
 }

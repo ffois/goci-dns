@@ -37,6 +37,12 @@ var (
 
 	// levelVar allows runtime log level changes.
 	levelVar slog.LevelVar
+
+	// DefaultLevel is used when LOG_LEVEL is not set. Override it at build
+	// time for a debug build:
+	//
+	//	go build -ldflags "-X goci-dns/internals/logger.DefaultLevel=DEBUG"
+	DefaultLevel = "INFO"
 )
 
 // ---------------------------------------------------------------------------
@@ -49,7 +55,8 @@ var (
 // 28 days, gzip-compressed old files.
 // If the log file cannot be created, the logger still writes to os.Stdout
 // and the error is returned.
-// The log level is read from the LOG_LEVEL env var (DEBUG|INFO|WARN|ERROR).
+// The log level is read from the LOG_LEVEL env var (DEBUG|INFO|WARN|ERROR),
+// falling back to DefaultLevel.
 func InitLogger(appName string) error {
 	// Parse log level from environment
 	setLevelFromEnv()
@@ -64,6 +71,29 @@ func InitLogger(appName string) error {
 	setHandler(io.MultiWriter(os.Stdout, rotator))
 	Logger.Info("logger initialised", "log_file", logPath, "level", levelVar.Level().String())
 	return nil
+}
+
+// InitFileLogger is like InitLogger but writes only to the rotating log file,
+// never to os.Stdout. It is meant for interactive commands (the setup wizard)
+// where stdout output would corrupt the terminal UI. If the log file cannot
+// be created, logs are discarded and the error is returned.
+func InitFileLogger(appName string) (string, error) {
+	setLevelFromEnv()
+
+	logPath, err := openLogFile(appName)
+	if err != nil {
+		setHandler(io.Discard)
+		return "", err
+	}
+
+	setHandler(rotator)
+	Logger.Info("logger initialised (file only)", "log_file", logPath, "level", levelVar.Level().String())
+	return logPath, nil
+}
+
+// DebugEnabled reports whether DEBUG messages are currently logged.
+func DebugEnabled() bool {
+	return levelVar.Level() <= slog.LevelDebug
 }
 
 // openLogFile creates the logs directory and the rotating file writer.
@@ -243,7 +273,11 @@ func LogDepth(skip int, args ...any) {
 // ---------------------------------------------------------------------------
 
 func setLevelFromEnv() {
-	SetLevelFromString(os.Getenv("LOG_LEVEL"))
+	level := os.Getenv("LOG_LEVEL")
+	if strings.TrimSpace(level) == "" {
+		level = DefaultLevel
+	}
+	SetLevelFromString(level)
 }
 
 // logWithCaller captures the correct caller frame (skipping this package).

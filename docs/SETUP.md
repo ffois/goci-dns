@@ -138,3 +138,14 @@ Pick one method in `[GoCI]`:
 | Cloudflare `7003 Could not route` | `CF_ZONE_ID` is wrong. |
 | IONOS `401` | `IONOS_API_KEY` must be `<prefix>.<secret>`, joined with a dot. |
 | Wizard: "no zones are visible" | The credentials cannot list zones. Choose **Enter the Zone ID manually** and paste it from the dashboard. |
+
+### Debug logs
+
+Set `LOG_LEVEL=DEBUG` at runtime, or build a binary that defaults to DEBUG:
+
+```bash
+go build -ldflags "-X goci-dns/internals/logger.DefaultLevel=DEBUG" -o build/goci-dns-debug .
+./build/goci-dns-debug setup /tmp/test.ini
+```
+
+The wizard logs only to the file (`<user config dir>/goci-dns/logs/app.log`, e.g. `~/Library/Application Support/goci-dns/logs/app.log` on macOS, `~/.config/goci-dns/logs/app.log` on Linux) and prints its path at start. Tokens and API keys are never logged.

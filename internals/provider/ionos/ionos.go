@@ -36,6 +36,7 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 	if records == nil {
 		return fmt.Errorf("ionos zone has no records payload")
 	}
+	logger.Debug("[IONOS] zone records fetched", "zone_id", cfg.IONOS.IONOSZoneID, "count", len(*records))
 
 	for _, recordID := range cfg.IONOS.IONOSEntryIDs {
 		recordID = strings.TrimSpace(recordID)

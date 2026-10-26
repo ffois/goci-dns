@@ -40,6 +40,7 @@ func UpdateDNS(cfg *utils.Config, newIP string) error {
 	if err := iter.Err(); err != nil {
 		return fmt.Errorf("list records: %w", err)
 	}
+	logger.Debug("[CF] zone records listed", "zone_id", cfg.CF.CFZoneID, "count", len(currentRecords))
 
 	for _, recordID := range cfg.CF.CFDNSEntryIDs {
 		recordID = strings.TrimSpace(recordID)
