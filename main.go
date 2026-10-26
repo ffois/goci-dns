@@ -82,15 +82,21 @@ func resolveIP(domain string) (string, error) {
 // Cloudflare stuff funcs
 
 // updateCFDNS iterates over every DNS record ID in cfg and PUTs the new IP.
-// It first GETs the current record so it can preserve the record name.
+// It first lists all zone records (across every page) so it can preserve the record name.
 func updateCFDNS(cfg *utils.Config, newIP string) error {
 	client := cloudflare.NewClient(option.WithAPIToken(cfg.CF.CFToken))
 	ctx := context.Background()
 
-	currentRecords, err := client.DNS.Records.List(ctx, dns.RecordListParams{
+	// Walk every page of the zone so records beyond the first page are found too.
+	currentRecords := make(map[string]dns.RecordResponse)
+	iter := client.DNS.Records.ListAutoPaging(ctx, dns.RecordListParams{
 		ZoneID: cloudflare.F(cfg.CF.CFZoneID),
 	})
-	if err != nil {
+	for iter.Next() {
+		r := iter.Current()
+		currentRecords[r.ID] = r
+	}
+	if err := iter.Err(); err != nil {
 		return fmt.Errorf("list records: %w", err)
 	}
 
@@ -100,14 +106,8 @@ func updateCFDNS(cfg *utils.Config, newIP string) error {
 			continue
 		}
 
-		var existing *dns.RecordResponse
-		for _, r := range currentRecords.Result {
-			if r.ID == recordID {
-				existing = &r
-				break
-			}
-		}
-		if existing == nil {
+		existing, ok := currentRecords[recordID]
+		if !ok {
 			logger.Info(fmt.Sprintf("[%s] record not found in zone – skipping", recordID))
 			continue
 		}
@@ -121,7 +121,7 @@ func updateCFDNS(cfg *utils.Config, newIP string) error {
 		}
 
 		// PUT – overwrite with the new IP, keeping the same name.
-		_, err = client.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
+		_, err := client.DNS.Records.Update(ctx, recordID, dns.RecordUpdateParams{
 			ZoneID: cloudflare.F(cfg.CF.CFZoneID),
 			Body: dns.ARecordParam{
 				Name:    cloudflare.F(recordName),
