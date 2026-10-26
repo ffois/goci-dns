@@ -13,6 +13,7 @@ It resolves a configured hostname (or, opt-in, asks an HTTP service such as `api
 - Updates multiple Cloudflare DNS record IDs in one run
 - Updates multiple IONOS DNS record IDs in one run
 - Cloudflare and IONOS can be enabled independently or together
+- Interactive setup wizard (`goci-dns setup`) that lists your zones and records and writes `config.ini`
 
 ## Requirements
 
@@ -23,7 +24,15 @@ It resolves a configured hostname (or, opt-in, asks an HTTP service such as `api
 
 ## Configuration
 
-Copy `config.example.ini` to `config.ini` and edit it. The file is split into sections.
+The quickest way is the interactive wizard, which asks for your Cloudflare token and/or IONOS API key, lets you pick zones and A records, and writes `config.ini`:
+
+```bash
+./goci-dns setup [config.ini]
+```
+
+See **[docs/SETUP.md](docs/SETUP.md)** for how to create the token/API key and how to find Zone IDs and record IDs by hand.
+
+Alternatively, copy `config.example.ini` to `config.ini` and edit it. The file is split into sections.
 
 ### `[GoCI]` (general)
 
@@ -107,6 +116,7 @@ Directly used non-stdlib Go modules in this project:
 
 - `github.com/cloudflare/cloudflare-go/v7` (`v7.6.0`) - Apache License 2.0
 - `github.com/ffois/go-ionos` (`v1.0.0`) - MIT License
+- `github.com/charmbracelet/huh` (`v1.0.0`) - MIT License
 - `gopkg.in/ini.v1` (`v1.67.3`) - Apache License 2.0
 - `gopkg.in/natefinch/lumberjack.v2` (`v2.2.1`) - MIT License
 
