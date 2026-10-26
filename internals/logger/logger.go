@@ -1,6 +1,6 @@
 // Package logger provides structured JSON logging using log/slog.
 //
-// It writes simultaneously to os.Stdout and a rotating log file in AppData.
+// It writes simultaneously to os.Stdout and a rotating log file under os.UserConfigDir().
 // Log rotation is handled by lumberjack: files rotate at 10 MB, keeping
 // 5 backups for up to 28 days, with gzip compression on old files.
 //
@@ -155,10 +155,10 @@ func Fatal(msg string, args ...any) {
 // ---------------------------------------------------------------------------
 
 // CanonicalFields returns slog attributes for a canonical log line.
-// Call at the beginning of a Wails-bound function with defer:
+// Call at the beginning of a function with defer:
 //
 //	defer func(start time.Time) {
-//	    logger.Info("canonical_line", logger.CanonicalFields("ReadEML", start, err)...)
+//	    logger.Info("canonical_line", logger.CanonicalFields("UpdateDNS", start, err)...)
 //	}(time.Now())
 func CanonicalFields(fn string, start time.Time, err error) []any {
 	status := "success"
