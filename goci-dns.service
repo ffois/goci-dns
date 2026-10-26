@@ -15,7 +15,7 @@
 #   - Use goci-dns.timer (see below) for cron-style scheduling instead.
 
 [Unit]
-Description=goci-dns – Cloudflare dynamic DNS updater
+Description=goci-dns – Cloudflare/IONOS dynamic DNS updater
 After=network-online.target
 Wants=network-online.target
 
@@ -29,6 +29,9 @@ RestartSec=30s
 # Give the process write access only to its state directory.
 ReadWritePaths=/etc/goci-dns
 ProtectSystem=strict
+# Rotating log file at /var/log/goci-dns/logs/app.log (stdout also goes to journald).
+LogsDirectory=goci-dns
+Environment=XDG_CONFIG_HOME=/var/log
 
 [Install]
 WantedBy=multi-user.target
