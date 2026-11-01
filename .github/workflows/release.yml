@@ -189,12 +189,14 @@ jobs:
             type=raw,value=${{ needs.build.outputs.version }}
 
       - name: Build and push Docker image
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
           file: ./Dockerfile.build
           platforms: linux/amd64,linux/arm64,linux/386,linux/arm/v7,linux/arm/v6
           push: ${{ github.event_name != 'pull_request' }}
+          provenance: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -202,6 +204,27 @@ jobs:
           build-args: |
             VERSION=${{ needs.build.outputs.version }}
             BUILD_DATE=${{ steps.build_args.outputs.build_date }}
+
+      - name: Create per-arch tags
+        if: github.event_name != 'pull_request'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${GITHUB_REPOSITORY,,}"
+          PLATFORMS="linux/amd64:amd64 linux/arm64:arm64 linux/386:386 linux/arm/v7:armv7 linux/arm/v6:armv6"
+
+          for entry in $PLATFORMS; do
+            platform=${entry%%:*}
+            suffix=${entry#*:}
+            args=()
+            while IFS= read -r tag; do
+              [[ -n "$tag" ]] && args+=(-t "${tag}-${suffix}")
+            done <<< "$TAGS"
+
+            echo "Tagging ${platform}: ${args[*]}"
+            docker buildx imagetools create --platform "$platform" "${args[@]}" "${IMAGE}@${DIGEST}"
+          done
 
       - name: Image digest
         run: |
