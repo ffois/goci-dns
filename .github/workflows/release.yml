@@ -49,6 +49,8 @@ jobs:
 
       - name: Build binaries
         id: build
+        env:
+          CGO_ENABLED: "0"
         run: |
           mkdir -p ./dist
           
